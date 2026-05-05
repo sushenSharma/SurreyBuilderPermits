@@ -2232,7 +2232,13 @@ export async function POST(request: Request) {
     }
 
     if (!apiKey) {
-      return NextResponse.json({ error: "Missing ANTHROPIC_API_KEY in .env.local." }, { status: 500 });
+      return NextResponse.json(
+        {
+          error:
+            "Missing ANTHROPIC_API_KEY on the server. Add it to your production environment variables, then redeploy."
+        },
+        { status: 500 }
+      );
     }
 
     if (action === "extract") {
