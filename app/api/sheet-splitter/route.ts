@@ -2583,8 +2583,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ error: "Upload a PDF file." }, { status: 400 });
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "";
+    const isSavedOutputError =
+      errorMessage.includes("output/latest") ||
+      errorMessage.includes("sheets.json") ||
+      errorMessage.includes("extracted");
     const friendly =
-      error instanceof Error && error.message.includes("ENOENT")
+      errorMessage.includes("ENOENT") && isSavedOutputError
         ? "No saved split output found. Run Split PDF first."
         : error instanceof Error
           ? error.message
