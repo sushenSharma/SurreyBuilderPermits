@@ -2535,6 +2535,36 @@ export async function POST(request: Request) {
   const dpi = Number.isFinite(dpiValue) ? Math.min(Math.max(dpiValue, 100), MAX_DPI) : DEFAULT_DPI;
 
   try {
+    if (!apiKey) {
+      return NextResponse.json(
+        {
+          error:
+            "Missing ANTHROPIC_API_KEY on the server. Add it to your production environment variables, then redeploy."
+        },
+        { status: 500 }
+      );
+    }
+
+    if (file instanceof File) {
+      if (file.type !== "application/pdf") {
+        return NextResponse.json({ error: "Only PDF files are supported." }, { status: 400 });
+      }
+
+      if (file.size > MAX_FILE_BYTES) {
+        return NextResponse.json({ error: "PDF must be 32MB or smaller for this first pass." }, { status: 413 });
+      }
+
+      if (action === "split") {
+        return await runSplitOnly({ file, dpi, apiKey });
+      }
+
+      return await runFullReportOnTheFly({ file, dpi, apiKey });
+    }
+
+    if (action === "extract") {
+      return await runExtractionOnly(apiKey);
+    }
+
     if (action === "precheck") {
       return await runPrecheckOnly();
     }
@@ -2551,41 +2581,7 @@ export async function POST(request: Request) {
       return await runOpeningsOnly();
     }
 
-    if (!apiKey) {
-      return NextResponse.json(
-        {
-          error:
-            "Missing ANTHROPIC_API_KEY on the server. Add it to your production environment variables, then redeploy."
-        },
-        { status: 500 }
-      );
-    }
-
-    if (action === "extract") {
-      return await runExtractionOnly(apiKey);
-    }
-
-    if (action !== "split" && action !== "full") {
-      return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
-    }
-
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: "Upload a PDF file." }, { status: 400 });
-    }
-
-    if (file.type !== "application/pdf") {
-      return NextResponse.json({ error: "Only PDF files are supported." }, { status: 400 });
-    }
-
-    if (file.size > MAX_FILE_BYTES) {
-      return NextResponse.json({ error: "PDF must be 32MB or smaller for this first pass." }, { status: 413 });
-    }
-
-    if (action === "split") {
-      return await runSplitOnly({ file, dpi, apiKey });
-    }
-
-    return await runFullReportOnTheFly({ file, dpi, apiKey });
+    return NextResponse.json({ error: "Upload a PDF file." }, { status: 400 });
   } catch (error) {
     const friendly =
       error instanceof Error && error.message.includes("ENOENT")

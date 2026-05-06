@@ -7,8 +7,6 @@ import {
   FileText,
   Layers3,
   Loader2,
-  Play,
-  ScanLine,
   ShieldCheck,
   Sparkles,
   UploadCloud,
@@ -63,8 +61,6 @@ type DimensionFinding = {
 };
 
 type DimensionStatusFilter = "ALL" | DimensionFinding["status"];
-
-type PipelineAction = "full" | "split" | "extract" | "precheck" | "dimensions" | "rooms" | "openings";
 
 type RoomMeasurement = {
   sheet_id: string;
@@ -273,7 +269,7 @@ export default function Home() {
     }));
   }
 
-  async function postPipelineAction(action: PipelineAction) {
+  async function postPipelineAction(action: "full") {
     const formData = new FormData();
     formData.append("action", action);
     if (file) formData.append("file", file);
@@ -330,76 +326,6 @@ export default function Home() {
       setStatusMessage("Report complete. Rooms, openings, and BCBC checks are ready.");
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : "Plan precheck failed.");
-      setStatusMessage("");
-      setSteps((current) =>
-        current.map((step) => (step.state === "running" ? { ...step, state: "idle" } : step))
-      );
-    } finally {
-      window.clearInterval(progressTimer);
-      setIsRunning(false);
-      setRunningAction("");
-    }
-  }
-
-  async function runStep(action: PipelineAction) {
-    if ((action === "split" && !file) || isRunning) return;
-    const actionLabel =
-      action === "split"
-        ? "Splitting PDF"
-        : action === "extract"
-          ? "Extracting saved sheets"
-          : action === "precheck"
-            ? "Running precheck"
-            : action === "dimensions"
-              ? "Reviewing dimensions"
-              : action === "rooms"
-                ? "Extracting room measurements"
-                : "Extracting door/window tags";
-    setIsRunning(true);
-    setRunningAction(action);
-    setError("");
-    setStatusMessage(`${actionLabel}...`);
-    setSteps(defaultSteps.map((step, index) => ({ ...step, state: index === 0 ? "running" : "idle" })));
-
-    const progressTimer = window.setInterval(() => {
-      setSteps((current) => {
-        const runningIndex = current.findIndex((step) => step.state === "running");
-        if (runningIndex === -1 || runningIndex === current.length - 1) return current;
-
-        return current.map((step, stepIndex) => {
-          if (stepIndex <= runningIndex) return { ...step, state: "done" };
-          if (stepIndex === runningIndex + 1) return { ...step, state: "running" };
-          return step;
-        });
-      });
-    }, 900);
-
-    try {
-      const payload = await postPipelineAction(action);
-      if (action === "precheck" && payload.precheck) {
-        setStatusMessage(
-          `Precheck complete: ${payload.precheck.summary.blockerCount} blockers, ${payload.precheck.summary.warningCount} warnings, ${payload.precheck.summary.clarificationCount ?? 0} clarifications, ${payload.precheck.summary.infoCount} info.`
-        );
-      } else if (action === "dimensions" && payload.dimensions) {
-        setStatusMessage(
-          `Dimensions complete: ${payload.dimensions.summary.flagCount} flags, ${payload.dimensions.summary.verifyCount} verify, ${payload.dimensions.summary.passCount} pass.`
-        );
-      } else if (action === "rooms" && payload.roomMeasurements) {
-        setStatusMessage(
-          `Room measurements complete: ${payload.roomMeasurements.summary.dimensionedRoomCount} of ${payload.roomMeasurements.summary.roomCount} rooms have dimensions.`
-        );
-      } else if (action === "openings" && payload.openings) {
-        setStatusMessage(
-          `Door/window tags complete: ${payload.openings.summary.doorCount} doors, ${payload.openings.summary.windowCount} windows, ${payload.openings.summary.flagCount} flags.`
-        );
-      } else if (action === "extract" && payload.extraction) {
-        setStatusMessage(`Extraction complete: ${payload.extraction.summary.extractedSheets} saved sheets extracted.`);
-      } else {
-        setStatusMessage(`Split complete: ${payload.summary.sheetCount} sheets saved.`);
-      }
-      setSteps(defaultSteps.map((step) => ({ ...step, state: "done" })));
-    } catch (runError) {
-      setError(runError instanceof Error ? runError.message : "Sheet splitter failed.");
       setStatusMessage("");
       setSteps((current) =>
         current.map((step) => (step.state === "running" ? { ...step, state: "idle" } : step))
@@ -521,28 +447,6 @@ export default function Home() {
                 {runningAction === "complete" ? <Loader2 className="spin" size={20} /> : <Sparkles size={20} />}
                 Create BCBC report
               </button>
-              <div className="advancedActions" aria-label="Advanced stage controls">
-                <button className="secondaryButton" type="button" disabled={!file || isRunning} onClick={() => runStep("split")}>
-                  {runningAction === "split" ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
-                  Split
-                </button>
-                <button className="secondaryButton" type="button" disabled={isRunning} onClick={() => runStep("extract")}>
-                  {runningAction === "extract" ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
-                  Extract
-                </button>
-                <button className="secondaryButton" type="button" disabled={isRunning} onClick={() => runStep("rooms")}>
-                  {runningAction === "rooms" ? <Loader2 className="spin" size={18} /> : <ScanLine size={18} />}
-                  Rooms
-                </button>
-                <button className="secondaryButton" type="button" disabled={isRunning} onClick={() => runStep("openings")}>
-                  {runningAction === "openings" ? <Loader2 className="spin" size={18} /> : <ScanLine size={18} />}
-                  Tags
-                </button>
-                <button className="secondaryButton" type="button" disabled={isRunning} onClick={() => runStep("dimensions")}>
-                  {runningAction === "dimensions" ? <Loader2 className="spin" size={18} /> : <ClipboardCheck size={18} />}
-                  BCBC
-                </button>
-              </div>
             </div>
             {statusMessage ? (
               <p className={`statusText ${result?.precheck || result?.dimensions ? "precheckStatus" : ""}`}>
