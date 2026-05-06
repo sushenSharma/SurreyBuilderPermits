@@ -581,13 +581,10 @@ async function rasterizePdf(pdfPath: string, outputPrefix: string, dpi: number) 
   globals.DOMMatrix ??= canvasModule.DOMMatrix;
   globals.ImageData ??= canvasModule.ImageData;
   globals.Path2D ??= canvasModule.Path2D;
-  pdfjs.GlobalWorkerOptions.workerSrc = "";
 
   const pdfData = new Uint8Array(await readFile(pdfPath));
   const pdf = await pdfjs.getDocument({
     data: pdfData,
-    disableFontFace: true,
-    isEvalSupported: false,
     useSystemFonts: true
   }).promise;
   const scale = dpi / 72;
