@@ -5,6 +5,7 @@ const projectRoot = dirname(fileURLToPath(import.meta.url));
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  serverExternalPackages: ["@napi-rs/canvas"],
   turbopack: {
     root: projectRoot
   }

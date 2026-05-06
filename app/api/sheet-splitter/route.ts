@@ -571,24 +571,43 @@ function stitchPages(pageResults: PageSheetMetadata[]) {
 }
 
 async function rasterizePdf(pdfPath: string, outputPrefix: string, dpi: number) {
-  try {
-    await execFileAsync("pdftoppm", ["-png", "-r", String(dpi), pdfPath, outputPrefix]);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not run pdftoppm.";
-    throw new Error(`Poppler is required to split PDFs into page images. Install it with "brew install poppler". ${message}`);
+  const directory = outputPrefix.slice(0, outputPrefix.lastIndexOf("/"));
+  await mkdir(directory, { recursive: true });
+
+  const canvasModule = await import("@napi-rs/canvas");
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const globals = globalThis as unknown as Record<string, unknown>;
+
+  globals.DOMMatrix ??= canvasModule.DOMMatrix;
+  globals.ImageData ??= canvasModule.ImageData;
+  globals.Path2D ??= canvasModule.Path2D;
+
+  const pdfData = new Uint8Array(await readFile(pdfPath));
+  const pdf = await pdfjs.getDocument({
+    data: pdfData,
+    useSystemFonts: true
+  }).promise;
+  const scale = dpi / 72;
+  const pageImages: string[] = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const viewport = page.getViewport({ scale });
+    const canvas = canvasModule.createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+    const canvasContext = canvas.getContext("2d");
+    const outputPath = join(directory, `page-${String(pageNumber).padStart(3, "0")}.png`);
+
+    await page.render({
+      canvas: canvas as unknown as HTMLCanvasElement,
+      canvasContext: canvasContext as unknown as CanvasRenderingContext2D,
+      viewport
+    }).promise;
+
+    await writeFile(outputPath, await canvas.encode("png"));
+    pageImages.push(outputPath);
   }
 
-  const directory = outputPrefix.slice(0, outputPrefix.lastIndexOf("/"));
-  const files = await readdir(directory);
-
-  return files
-    .filter((file) => file.startsWith("page-") && file.endsWith(".png"))
-    .sort((a, b) => {
-      const aPage = Number(a.match(/-(\d+)\.png$/)?.[1] ?? 0);
-      const bPage = Number(b.match(/-(\d+)\.png$/)?.[1] ?? 0);
-      return aPage - bPage;
-    })
-    .map((file) => join(directory, file));
+  return pageImages;
 }
 
 async function analyzePage({
