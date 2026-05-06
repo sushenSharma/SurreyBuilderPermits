@@ -992,6 +992,42 @@ async function loadLatestSplit() {
   };
 }
 
+async function splitPdfInWorkspace({
+  file,
+  dpi,
+  apiKey,
+  workspace
+}: {
+  file: File;
+  dpi: number;
+  apiKey: string;
+  workspace: string;
+}) {
+  const pdfPath = join(workspace, "input.pdf");
+  await writeFile(pdfPath, Buffer.from(await file.arrayBuffer()));
+
+  const pageImages = await rasterizePdf(pdfPath, join(workspace, "page"), dpi);
+
+  if (!pageImages.length) {
+    throw new Error("No pages were produced from the PDF.");
+  }
+
+  const pageResults = await mapWithConcurrency(pageImages, PAGE_CONCURRENCY, (imagePath, index) =>
+    analyzePage({
+      apiKey,
+      imagePath,
+      page: index + 1,
+      dpi
+    })
+  );
+
+  return {
+    pdfPath,
+    pageImages,
+    splitResult: stitchPages(pageResults)
+  };
+}
+
 async function runSplitOnly({
   file,
   dpi,
@@ -1004,25 +1040,7 @@ async function runSplitOnly({
   const workspace = await mkdtemp(join(tmpdir(), "sheet-splitter-"));
 
   try {
-    const pdfPath = join(workspace, "input.pdf");
-    await writeFile(pdfPath, Buffer.from(await file.arrayBuffer()));
-
-    const pageImages = await rasterizePdf(pdfPath, join(workspace, "page"), dpi);
-
-    if (!pageImages.length) {
-      return NextResponse.json({ error: "No pages were produced from the PDF." }, { status: 422 });
-    }
-
-    const pageResults = await mapWithConcurrency(pageImages, PAGE_CONCURRENCY, (imagePath, index) =>
-      analyzePage({
-        apiKey,
-        imagePath,
-        page: index + 1,
-        dpi
-      })
-    );
-
-    const splitResult = stitchPages(pageResults);
+    const { pdfPath, pageImages, splitResult } = await splitPdfInWorkspace({ file, dpi, apiKey, workspace });
     const artifacts = await saveSplitArtifacts({
       file,
       dpi,
@@ -1067,6 +1085,47 @@ async function runExtractionOnly(apiKey: string) {
       extracted
     })
   );
+}
+
+async function runFullReportOnTheFly({
+  file,
+  dpi,
+  apiKey
+}: {
+  file: File;
+  dpi: number;
+  apiKey: string;
+}) {
+  const workspace = await mkdtemp(join(tmpdir(), "permit-precheck-"));
+
+  try {
+    const { pageImages, splitResult } = await splitPdfInWorkspace({ file, dpi, apiKey, workspace });
+    const extracted = (await mapWithConcurrency(splitResult.sheets, SHEET_EXTRACTION_CONCURRENCY, (sheet) =>
+      extractSheet({
+        apiKey,
+        sheet,
+        pageImages
+      })
+    )) as Array<Record<string, unknown>>;
+    const sources = extractionSources(splitResult);
+    const roomMeasurements = buildRoomMeasurementReport(extracted, sources);
+    const openings = buildOpeningReport(extracted, sources);
+    const dimensions = buildDimensionReport(extracted);
+    const precheck = buildPrecheckReport(extracted);
+
+    return NextResponse.json(
+      toClientPayload({
+        splitResult,
+        extracted,
+        roomMeasurements,
+        openings,
+        dimensions,
+        precheck
+      })
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
 }
 
 function arrayLength(value: unknown) {
@@ -1535,16 +1594,7 @@ async function runDimensionsOnly() {
   }
 
   const extracted = await Promise.all(files.map((file) => readJson<Record<string, unknown>>(join(extractedDir, file))));
-  const findings = extracted.flatMap((sheet) => runDimensionsForSheet(sheet));
-  const dimensions = {
-    summary: {
-      passCount: findings.filter((finding) => finding.status === "PASS").length,
-      verifyCount: findings.filter((finding) => finding.status === "VERIFY").length,
-      flagCount: findings.filter((finding) => finding.status === "FLAG").length,
-      notes: "Dimension review used saved extraction JSON plus the local bcbc-dimensions skill, so it did not spend PDF/image tokens."
-    },
-    findings
-  };
+  const dimensions = buildDimensionReport(extracted);
 
   await writeFile(
     join(runDir, "dimension-report.json"),
@@ -1610,6 +1660,38 @@ function extractRoomMeasurementsForSheet(sheet: Record<string, unknown>, source:
     .filter((room) => isDimensionReviewRoom(room.room_name));
 }
 
+function extractionSources(splitResult: SplitResult) {
+  return splitResult.sheets.map((sheet, index) => `${sheetFolderName(sheet, index)}.json`);
+}
+
+function buildDimensionReport(extracted: Array<Record<string, unknown>>) {
+  const findings = extracted.flatMap((sheet) => runDimensionsForSheet(sheet));
+
+  return {
+    summary: {
+      passCount: findings.filter((finding) => finding.status === "PASS").length,
+      verifyCount: findings.filter((finding) => finding.status === "VERIFY").length,
+      flagCount: findings.filter((finding) => finding.status === "FLAG").length,
+      notes:
+        "Dimension review used the current extraction data plus the local bcbc-dimensions skill, without requiring saved output files."
+    },
+    findings
+  };
+}
+
+function buildRoomMeasurementReport(extracted: Array<Record<string, unknown>>, sources: string[]) {
+  const rooms = extracted.flatMap((sheet, index) => extractRoomMeasurementsForSheet(sheet, sources[index] ?? "Vision extractor"));
+
+  return {
+    summary: {
+      roomCount: rooms.length,
+      dimensionedRoomCount: rooms.filter((room) => Boolean(room.dimensions)).length,
+      notes: "Room measurements were built from the current vision extraction data."
+    },
+    rooms
+  };
+}
+
 async function runRoomMeasurementsOnly() {
   const { runDir, splitResult } = await loadLatestSplit();
   const extractedDir = join(runDir, "extracted");
@@ -1623,15 +1705,7 @@ async function runRoomMeasurementsOnly() {
   }
 
   const extracted = await Promise.all(files.map((file) => readJson<Record<string, unknown>>(join(extractedDir, file))));
-  const rooms = extracted.flatMap((sheet, index) => extractRoomMeasurementsForSheet(sheet, files[index]));
-  const roomMeasurements = {
-    summary: {
-      roomCount: rooms.length,
-      dimensionedRoomCount: rooms.filter((room) => Boolean(room.dimensions)).length,
-      notes: "Room measurements were built from saved extraction JSON only, so this did not spend PDF/image tokens."
-    },
-    rooms
-  };
+  const roomMeasurements = buildRoomMeasurementReport(extracted, files);
 
   await writeFile(
     join(runDir, "room-measurements.json"),
@@ -1843,6 +1917,24 @@ function extractOpeningsForSheet(sheet: Record<string, unknown>, source: string)
   return openings;
 }
 
+function buildOpeningReport(extracted: Array<Record<string, unknown>>, sources: string[]) {
+  const tags = extracted.flatMap((sheet, index) => extractOpeningsForSheet(sheet, sources[index] ?? "Vision extractor"));
+
+  return {
+    summary: {
+      tagCount: tags.length,
+      doorCount: tags.filter((tag) => tag.kind === "door").length,
+      windowCount: tags.filter((tag) => tag.kind === "window").length,
+      passCount: tags.filter((tag) => tag.egress_status === "PASS").length,
+      verifyCount: tags.filter((tag) => tag.egress_status === "VERIFY").length,
+      flagCount: tags.filter((tag) => tag.egress_status === "FLAG").length,
+      notes:
+        "Door/window tags were extracted from the current vision extraction data. Window egress remains VERIFY unless clear opening and sill data are extracted."
+    },
+    tags
+  };
+}
+
 async function runOpeningsOnly() {
   const { runDir, splitResult } = await loadLatestSplit();
   const extractedDir = join(runDir, "extracted");
@@ -1856,19 +1948,7 @@ async function runOpeningsOnly() {
   }
 
   const extracted = await Promise.all(files.map((file) => readJson<Record<string, unknown>>(join(extractedDir, file))));
-  const tags = extracted.flatMap((sheet, index) => extractOpeningsForSheet(sheet, files[index]));
-  const openings = {
-    summary: {
-      tagCount: tags.length,
-      doorCount: tags.filter((tag) => tag.kind === "door").length,
-      windowCount: tags.filter((tag) => tag.kind === "window").length,
-      passCount: tags.filter((tag) => tag.egress_status === "PASS").length,
-      verifyCount: tags.filter((tag) => tag.egress_status === "VERIFY").length,
-      flagCount: tags.filter((tag) => tag.egress_status === "FLAG").length,
-      notes: "Door/window tags were extracted from saved JSON only. Window egress remains VERIFY unless clear opening and sill data are extracted."
-    },
-    tags
-  };
+  const openings = buildOpeningReport(extracted, files);
 
   await writeFile(
     join(runDir, "opening-egress-tags.json"),
@@ -1917,6 +1997,246 @@ function makeIssue(
     recommended_action: recommendedAction,
     official_source_url: officialSourceUrl
   });
+}
+
+function buildPrecheckReport(extracted: Array<Record<string, unknown>>) {
+  const issues: PrecheckIssue[] = [];
+
+  for (const sheet of extracted) {
+    const sheetId = stringValue(sheet.sheet_id) || "UNKNOWN";
+    const confidence = numberValue(sheet.extraction_confidence);
+    const completeness = sheet.completeness_check as Record<string, unknown> | undefined;
+    const completenessPct = numberValue(completeness?.completeness_pct);
+    const expectedDimensions = numberValue(completeness?.expected_dimension_strings);
+    const extractedDimensions = numberValue(completeness?.extracted_dimension_strings);
+    const expectedDoors = numberValue(completeness?.expected_door_tags);
+    const extractedDoors = numberValue(completeness?.extracted_door_tags);
+    const expectedWindows = numberValue(completeness?.expected_window_tags);
+    const extractedWindows = numberValue(completeness?.extracted_window_tags);
+    const lowConfidenceItems = Array.isArray(sheet.low_confidence_items) ? sheet.low_confidence_items : [];
+    const unitsCount = arrayLength(sheet.units);
+    const floorLevelsCount = arrayLength(sheet.floor_levels);
+    const annotationsCount = arrayLength(sheet.annotations);
+    const structuralNotes = textArray(sheet.structural_notes);
+    const projectMetadata = sheet.project_metadata as Record<string, unknown> | undefined;
+    const sheetType = inferPrecheckSheetType(sheet);
+    const siteData = sheet.site_data;
+
+    if (confidence > 0 && confidence < 70) {
+      makeIssue(
+        issues,
+        "warning",
+        sheetId,
+        "confidence",
+        `Extraction confidence is ${confidence}%.`,
+        "Review this sheet manually or rerun extraction at 300 DPI.",
+        "Surrey plan intake QA",
+        OFFICIAL_SOURCES.surreyBylaws,
+        `extraction_confidence=${confidence}`
+      );
+    }
+
+    if (completenessPct > 0 && completenessPct < 75) {
+      makeIssue(
+        issues,
+        completenessPct < 50 ? "blocker" : "warning",
+        sheetId,
+        "completeness",
+        `Extraction completeness is ${completenessPct}%.`,
+        "Check missing dimensions/tags before relying on downstream code checks.",
+        "Surrey plan intake QA",
+        OFFICIAL_SOURCES.surreyBylaws,
+        `completeness_check.completeness_pct=${completenessPct}`
+      );
+    }
+
+    if (expectedDimensions > 0 && extractedDimensions === 0 && sheetType !== "elevation") {
+      makeIssue(
+        issues,
+        "blocker",
+        sheetId,
+        "dimensions",
+        "Dimension strings were expected but none were extracted.",
+        "Confirm dimensions from the split PDF before submission.",
+        sheetType === "site" ? "Surrey Zoning Bylaw 12000" : "BCBC 2024 drawing completeness",
+        sheetType === "site" ? OFFICIAL_SOURCES.surreyZoningBylaw12000 : OFFICIAL_SOURCES.bcbc2024,
+        `expected_dimension_strings=${expectedDimensions}, extracted_dimension_strings=${extractedDimensions}`
+      );
+    }
+
+    if (expectedDoors > 0 && extractedDoors === 0) {
+      makeIssue(
+        issues,
+        "warning",
+        sheetId,
+        "doors",
+        "Door tags were expected but none were extracted.",
+        "Review door tags and egress-related openings.",
+        "BCBC 2024 egress/opening coordination",
+        OFFICIAL_SOURCES.bcbc2024,
+        `expected_door_tags=${expectedDoors}, extracted_door_tags=${extractedDoors}`
+      );
+    }
+
+    if (expectedWindows > 0 && extractedWindows === 0) {
+      makeIssue(
+        issues,
+        "warning",
+        sheetId,
+        "windows",
+        "Window tags were expected but none were extracted.",
+        "Review window tags, bedroom egress windows, and fenestration references.",
+        "BCBC 2024 egress/fenestration coordination",
+        OFFICIAL_SOURCES.bcbc2024,
+        `expected_window_tags=${expectedWindows}, extracted_window_tags=${extractedWindows}`
+      );
+    }
+
+    if (sheetType === "floor-plan" && unitsCount === 0) {
+      makeIssue(
+        issues,
+        "warning",
+        sheetId,
+        "rooms",
+        "Floor-plan-like sheet has no extracted rooms/units.",
+        "Confirm room labels, room dimensions, stairs, smoke/CO alarms, and suite separation notes before city review.",
+        "BCBC 2024 Part 9 drawing completeness",
+        OFFICIAL_SOURCES.bcbc2024,
+        `inferred_sheet_type=${sheetType}, units.length=${unitsCount}`
+      );
+    }
+
+    if (sheetType === "site" && !siteData) {
+      makeIssue(
+        issues,
+        "warning",
+        sheetId,
+        "site",
+        "Site plan has no extracted site_data.",
+        "Confirm lot dimensions, setbacks, parking, FAR/lot coverage, grades, trees, services, and zoning table.",
+        "Surrey Zoning Bylaw 12000",
+        OFFICIAL_SOURCES.surreyZoningBylaw12000,
+        "site_data=null"
+      );
+    }
+
+    if (sheetType === "elevation" && floorLevelsCount === 0) {
+      makeIssue(
+        issues,
+        "warning",
+        sheetId,
+        "elevations",
+        "Elevation sheet has no extracted floor levels or height markers.",
+        "Confirm building height, average grade, roof ridge, roof plate, floor levels, materials, and openings.",
+        "Surrey Zoning Bylaw 12000 height/setback review and BCBC 2024 elevation completeness",
+        OFFICIAL_SOURCES.surreyZoningBylaw12000,
+        `inferred_sheet_type=${sheetType}, floor_levels.length=${floorLevelsCount}`
+      );
+    }
+
+    if (sheetType === "section" && structuralNotes.length === 0) {
+      makeIssue(
+        issues,
+        "warning",
+        sheetId,
+        "sections",
+        "Section-like sheet has no extracted structural or assembly notes.",
+        "Confirm ceiling heights, floor-to-floor heights, foundation/slab notes, insulation, vapour barrier, rainscreen, and fire separations.",
+        "BCBC 2024 Part 9 section/detail completeness",
+        OFFICIAL_SOURCES.bcbc2024,
+        `inferred_sheet_type=${sheetType}, structural_notes.length=${structuralNotes.length}`
+      );
+    }
+
+    if (sheetType === "site") {
+      const metadataText = JSON.stringify(sheet).toUpperCase();
+      const hasAddress = metadataText.includes("SURREY") || /\d{4,}/.test(metadataText);
+      const hasZone = metadataText.includes("ZONE") || metadataText.includes("RF") || metadataText.includes("R3");
+
+      if (!hasAddress) {
+        makeIssue(
+          issues,
+          "needs_clarification",
+          sheetId,
+          "project-context",
+          "Civic address was not confidently extracted from the site plan data.",
+          "Confirm civic address before applying Surrey zoning and servicing checks.",
+          "Surrey permit intake context",
+          OFFICIAL_SOURCES.surreyBylaws,
+          "address not found in extracted site data"
+        );
+      }
+
+      if (!hasZone) {
+        makeIssue(
+          issues,
+          "needs_clarification",
+          sheetId,
+          "zoning",
+          "Zoning category was not confidently extracted.",
+          "Confirm the property zone in Surrey COSMOS or the zoning data before checking setbacks, height, use, parking, and density.",
+          "Surrey Zoning Bylaw 12000",
+          OFFICIAL_SOURCES.surreyZoning,
+          "zone not found in extracted site data"
+        );
+      }
+    }
+
+    const codeCompliance = stringValue(projectMetadata?.code_compliance);
+    if (codeCompliance && !codeCompliance.includes("2024") && codeCompliance.includes("2018")) {
+      makeIssue(
+        issues,
+        "needs_clarification",
+        sheetId,
+        "code-edition",
+        "Extracted title block references the 2018 BC Building Code.",
+        "Confirm permit application date and whether BCBC 2024 applies before final code review.",
+        "BC Building Code 2024 effective-date guidance",
+        OFFICIAL_SOURCES.bcbc2024,
+        `project_metadata.code_compliance=${codeCompliance}`
+      );
+    }
+
+    if (lowConfidenceItems.length > 0) {
+      makeIssue(
+        issues,
+        "info",
+        sheetId,
+        "low-confidence",
+        `${lowConfidenceItems.length} low-confidence item(s) were reported.`,
+        "Review low_confidence_items in the extracted JSON.",
+        "Surrey plan intake QA",
+        OFFICIAL_SOURCES.surreyBylaws,
+        `low_confidence_items.length=${lowConfidenceItems.length}`
+      );
+    }
+
+    if (annotationsCount === 0 && sheetType !== "site") {
+      makeIssue(
+        issues,
+        "info",
+        sheetId,
+        "annotations",
+        "No general annotations were extracted.",
+        "Spot-check notes/callouts on the split sheet PDF.",
+        "Surrey plan intake QA",
+        OFFICIAL_SOURCES.surreyBylaws,
+        `inferred_sheet_type=${sheetType}, annotations.length=${annotationsCount}`
+      );
+    }
+  }
+
+  return {
+    summary: {
+      blockerCount: issues.filter((issue) => issue.severity === "blocker").length,
+      warningCount: issues.filter((issue) => issue.severity === "warning").length,
+      infoCount: issues.filter((issue) => issue.severity === "info").length,
+      clarificationCount: issues.filter((issue) => issue.severity === "needs_clarification").length,
+      notes:
+        "Precheck used the current extraction data plus local Surrey/BCBC skill rules, without requiring saved output files."
+    },
+    issues
+  };
 }
 
 async function runPrecheckOnly() {
@@ -2261,13 +2581,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "PDF must be 32MB or smaller for this first pass." }, { status: 413 });
     }
 
-    const splitResponse = await runSplitOnly({ file, dpi, apiKey });
-
-    if (action === "split" || !splitResponse.ok) {
-      return splitResponse;
+    if (action === "split") {
+      return await runSplitOnly({ file, dpi, apiKey });
     }
 
-    return await runExtractionOnly(apiKey);
+    return await runFullReportOnTheFly({ file, dpi, apiKey });
   } catch (error) {
     const friendly =
       error instanceof Error && error.message.includes("ENOENT")

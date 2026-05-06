@@ -64,7 +64,7 @@ type DimensionFinding = {
 
 type DimensionStatusFilter = "ALL" | DimensionFinding["status"];
 
-type PipelineAction = "split" | "extract" | "precheck" | "dimensions" | "rooms" | "openings";
+type PipelineAction = "full" | "split" | "extract" | "precheck" | "dimensions" | "rooms" | "openings";
 
 type RoomMeasurement = {
   sheet_id: string;
@@ -296,15 +296,6 @@ export default function Home() {
   async function runCompleteReport() {
     if (!file || isRunning) return;
 
-    const stages: Array<{ action: PipelineAction; label: string; stepIndex: number }> = [
-      { action: "split", label: "Splitting PDF into sheets", stepIndex: 1 },
-      { action: "extract", label: "Extracting sheet data with vision", stepIndex: 2 },
-      { action: "rooms", label: "Extracting room measurements", stepIndex: 3 },
-      { action: "openings", label: "Extracting door and window tags", stepIndex: 3 },
-      { action: "dimensions", label: "Comparing against BCBC skill", stepIndex: 4 },
-      { action: "precheck", label: "Compiling report", stepIndex: 5 }
-    ];
-
     setIsRunning(true);
     setRunningAction("complete");
     setResult(null);
@@ -312,19 +303,29 @@ export default function Home() {
     setStatusMessage("Starting complete BCBC report...");
     setSteps(defaultSteps.map((step, index) => ({ ...step, state: index === 0 ? "done" : index === 1 ? "running" : "idle" })));
 
-    try {
-      for (const stage of stages) {
-        setStatusMessage(`${stage.label}...`);
-        setSteps((current) =>
-          current.map((step, index) => {
-            if (index < stage.stepIndex) return { ...step, state: "done" };
-            if (index === stage.stepIndex) return { ...step, state: "running" };
-            return { ...step, state: "idle" };
-          })
-        );
-        await postPipelineAction(stage.action);
-      }
+    const stageMessages = [
+      "Splitting PDF into sheets...",
+      "Extracting sheet data with vision...",
+      "Extracting room measurements...",
+      "Extracting door and window tags...",
+      "Comparing against BCBC skill...",
+      "Compiling report..."
+    ];
+    let stageIndex = 0;
+    const progressTimer = window.setInterval(() => {
+      stageIndex = Math.min(stageIndex + 1, defaultSteps.length - 1);
+      setStatusMessage(stageMessages[stageIndex] ?? "Compiling report...");
+      setSteps((current) =>
+        current.map((step, index) => {
+          if (index < stageIndex) return { ...step, state: "done" };
+          if (index === stageIndex) return { ...step, state: "running" };
+          return { ...step, state: "idle" };
+        })
+      );
+    }, 4500);
 
+    try {
+      await postPipelineAction("full");
       setSteps(defaultSteps.map((step) => ({ ...step, state: "done" })));
       setStatusMessage("Report complete. Rooms, openings, and BCBC checks are ready.");
     } catch (runError) {
@@ -334,6 +335,7 @@ export default function Home() {
         current.map((step) => (step.state === "running" ? { ...step, state: "idle" } : step))
       );
     } finally {
+      window.clearInterval(progressTimer);
       setIsRunning(false);
       setRunningAction("");
     }
