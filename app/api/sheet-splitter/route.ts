@@ -581,7 +581,7 @@ async function rasterizePdf(pdfPath: string, outputPrefix: string, dpi: number) 
   globals.DOMMatrix ??= canvasModule.DOMMatrix;
   globals.ImageData ??= canvasModule.ImageData;
   globals.Path2D ??= canvasModule.Path2D;
-  pdfjs.GlobalWorkerOptions.workerSrc = "pdfjs-dist/legacy/build/pdf.worker.mjs";
+  pdfjs.GlobalWorkerOptions.workerSrc = "";
 
   const pdfData = new Uint8Array(await readFile(pdfPath));
   const pdf = await pdfjs.getDocument({
