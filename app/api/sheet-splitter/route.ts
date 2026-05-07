@@ -629,6 +629,20 @@ function lambdaPageItems(payload: unknown) {
   return [];
 }
 
+function lambdaPayloadSummary(payload: unknown) {
+  const normalized = normalizeLambdaPayload(payload);
+
+  if (!normalized || typeof normalized !== "object") {
+    return `response type: ${typeof normalized}`;
+  }
+
+  const objectPayload = normalized as Record<string, unknown>;
+  const keys = Object.keys(objectPayload);
+  const message = typeof objectPayload.message === "string" ? ` message: ${objectPayload.message}` : "";
+
+  return `keys: ${keys.length ? keys.join(", ") : "none"}.${message}`;
+}
+
 function pageBase64FromLambdaItem(item: unknown) {
   if (typeof item === "string") return item;
   if (!item || typeof item !== "object") return "";
@@ -642,6 +656,21 @@ function pageBase64FromLambdaItem(item: unknown) {
     objectItem.body;
 
   return typeof value === "string" ? value : "";
+}
+
+function pageMediaTypeFromLambdaItem(item: unknown) {
+  if (!item || typeof item !== "object") return "image/png";
+
+  const objectItem = item as Record<string, unknown>;
+  const value = objectItem.mediaType ?? objectItem.mimeType ?? objectItem.contentType;
+
+  return typeof value === "string" && value.startsWith("image/") ? value : "image/png";
+}
+
+function extensionForMediaType(mediaType: string) {
+  if (mediaType === "image/jpeg" || mediaType === "image/jpg") return "jpg";
+  if (mediaType === "image/webp") return "webp";
+  return "png";
 }
 
 function stripDataUrlPrefix(value: string) {
@@ -699,7 +728,9 @@ async function rasterizePdfWithLambda(pdfPath: string, outputPrefix: string, dpi
 
   const pages = lambdaPageItems(payload);
   if (!pages.length) {
-    throw new Error("PDF Lambda did not return page images. Expected pages, pageImages, images, or files array.");
+    throw new Error(
+      `PDF Lambda did not return page images. Expected pages, pageImages, images, or files array. Lambda returned ${lambdaPayloadSummary(payload)}`
+    );
   }
 
   const pageImages: string[] = [];
@@ -712,7 +743,11 @@ async function rasterizePdfWithLambda(pdfPath: string, outputPrefix: string, dpi
       throw new Error(`PDF Lambda page ${index + 1} did not include base64 image data or a downloadable URL.`);
     }
 
-    const outputPath = join(directory, `page-${String(index + 1).padStart(3, "0")}.png`);
+    const mediaType = pageMediaTypeFromLambdaItem(item);
+    const outputPath = join(
+      directory,
+      `page-${String(index + 1).padStart(3, "0")}.${extensionForMediaType(mediaType)}`
+    );
     await writeFile(outputPath, bytes);
     pageImages.push(outputPath);
   }
@@ -732,6 +767,11 @@ async function analyzePage({
   dpi: number;
 }) {
   const imageBase64 = (await readFile(imagePath)).toString("base64");
+  const mediaType = imagePath.toLowerCase().endsWith(".jpg") || imagePath.toLowerCase().endsWith(".jpeg")
+    ? "image/jpeg"
+    : imagePath.toLowerCase().endsWith(".webp")
+      ? "image/webp"
+      : "image/png";
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -762,7 +802,7 @@ async function analyzePage({
               type: "image",
               source: {
                 type: "base64",
-                media_type: "image/png",
+                media_type: mediaType,
                 data: imageBase64
               }
             },
