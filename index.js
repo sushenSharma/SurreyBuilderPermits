@@ -146,7 +146,7 @@ async function rasterizePdf(pdfPath, outputPrefix, dpi) {
     .map((file) => join(outputDir, file));
 }
 
-exports.handler = async (event) => {
+async function handleRequest(event) {
   if (event.requestContext?.http?.method === "OPTIONS" || event.httpMethod === "OPTIONS") {
     return {
       statusCode: 204,
@@ -197,5 +197,15 @@ exports.handler = async (event) => {
     });
   } finally {
     await rm(workspace, { recursive: true, force: true });
+  }
+}
+
+exports.handler = async (event) => {
+  try {
+    return await handleRequest(event);
+  } catch (error) {
+    return jsonResponse(500, {
+      error: error instanceof Error ? error.message : "Unhandled PDF Lambda failure."
+    });
   }
 };

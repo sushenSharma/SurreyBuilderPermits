@@ -700,14 +700,18 @@ async function rasterizePdfWithLambda(pdfPath: string, outputPrefix: string, dpi
   const directory = outputPrefix.slice(0, outputPrefix.lastIndexOf("/"));
   await mkdir(directory, { recursive: true });
 
-  const formData = new FormData();
   const pdfBytes = await readFile(pdfPath);
-  formData.append("file", new Blob([pdfBytes], { type: "application/pdf" }), basename(pdfPath));
-  formData.append("dpi", String(dpi));
 
   const response = await fetch(lambdaUrl, {
     method: "POST",
-    body: formData
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      filename: basename(pdfPath),
+      dpi,
+      pdfBase64: pdfBytes.toString("base64")
+    })
   });
   const responseText = await response.text();
   let payload: unknown;
