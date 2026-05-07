@@ -6,7 +6,7 @@ frontend:
         - npm ci
     build:
       commands:
-        - env | grep -e '^ANTHROPIC_API_KEY=' -e '^ANTHROPIC_MODEL=' >> .env.production
+        - env | grep -e '^ANTHROPIC_API_KEY=' -e '^ANTHROPIC_MODEL=' -e '^PDF_LAMBDA_URL=' >> .env.production
         - npm run build
   artifacts:
     baseDirectory: .next

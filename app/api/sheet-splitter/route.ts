@@ -571,6 +571,10 @@ function stitchPages(pageResults: PageSheetMetadata[]) {
 }
 
 async function rasterizePdf(pdfPath: string, outputPrefix: string, dpi: number) {
+  if (process.env.PDF_LAMBDA_URL) {
+    return await rasterizePdfWithLambda(pdfPath, outputPrefix, dpi, process.env.PDF_LAMBDA_URL);
+  }
+
   try {
     await execFileAsync("pdftoppm", ["-png", "-r", String(dpi), pdfPath, outputPrefix]);
   } catch (error) {
@@ -589,6 +593,131 @@ async function rasterizePdf(pdfPath: string, outputPrefix: string, dpi: number) 
       return aPage - bPage;
     })
     .map((file) => join(directory, file));
+}
+
+function normalizeLambdaPayload(payload: unknown): unknown {
+  if (
+    payload &&
+    typeof payload === "object" &&
+    "body" in payload &&
+    typeof (payload as { body?: unknown }).body === "string"
+  ) {
+    try {
+      return JSON.parse((payload as { body: string }).body);
+    } catch {
+      return payload;
+    }
+  }
+
+  return payload;
+}
+
+function lambdaPageItems(payload: unknown) {
+  const normalized = normalizeLambdaPayload(payload);
+
+  if (Array.isArray(normalized)) return normalized;
+  if (!normalized || typeof normalized !== "object") return [];
+
+  const objectPayload = normalized as Record<string, unknown>;
+  const candidateKeys = ["pages", "pageImages", "images", "files"];
+
+  for (const key of candidateKeys) {
+    const value = objectPayload[key];
+    if (Array.isArray(value)) return value;
+  }
+
+  return [];
+}
+
+function pageBase64FromLambdaItem(item: unknown) {
+  if (typeof item === "string") return item;
+  if (!item || typeof item !== "object") return "";
+
+  const objectItem = item as Record<string, unknown>;
+  const value =
+    objectItem.imageBase64 ??
+    objectItem.base64 ??
+    objectItem.data ??
+    objectItem.content ??
+    objectItem.body;
+
+  return typeof value === "string" ? value : "";
+}
+
+function stripDataUrlPrefix(value: string) {
+  return value.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "");
+}
+
+async function pageBytesFromLambdaItem(item: unknown) {
+  if (item && typeof item === "object") {
+    const url = (item as Record<string, unknown>).url;
+
+    if (typeof url === "string" && url) {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`PDF Lambda returned an image URL that could not be downloaded: ${response.status}`);
+      }
+      return Buffer.from(await response.arrayBuffer());
+    }
+  }
+
+  const base64 = stripDataUrlPrefix(pageBase64FromLambdaItem(item)).trim();
+  if (!base64) return null;
+
+  return Buffer.from(base64, "base64");
+}
+
+async function rasterizePdfWithLambda(pdfPath: string, outputPrefix: string, dpi: number, lambdaUrl: string) {
+  const directory = outputPrefix.slice(0, outputPrefix.lastIndexOf("/"));
+  await mkdir(directory, { recursive: true });
+
+  const formData = new FormData();
+  const pdfBytes = await readFile(pdfPath);
+  formData.append("file", new Blob([pdfBytes], { type: "application/pdf" }), basename(pdfPath));
+  formData.append("dpi", String(dpi));
+
+  const response = await fetch(lambdaUrl, {
+    method: "POST",
+    body: formData
+  });
+  const responseText = await response.text();
+  let payload: unknown;
+
+  try {
+    payload = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    throw new Error(`PDF Lambda returned non-JSON response: ${responseText.slice(0, 180)}`);
+  }
+
+  if (!response.ok) {
+    const errorMessage =
+      payload && typeof payload === "object" && "error" in payload
+        ? String((payload as { error: unknown }).error)
+        : responseText;
+    throw new Error(`PDF Lambda failed: ${errorMessage}`);
+  }
+
+  const pages = lambdaPageItems(payload);
+  if (!pages.length) {
+    throw new Error("PDF Lambda did not return page images. Expected pages, pageImages, images, or files array.");
+  }
+
+  const pageImages: string[] = [];
+
+  for (let index = 0; index < pages.length; index += 1) {
+    const item = pages[index];
+    const bytes = await pageBytesFromLambdaItem(item);
+
+    if (!bytes?.length) {
+      throw new Error(`PDF Lambda page ${index + 1} did not include base64 image data or a downloadable URL.`);
+    }
+
+    const outputPath = join(directory, `page-${String(index + 1).padStart(3, "0")}.png`);
+    await writeFile(outputPath, bytes);
+    pageImages.push(outputPath);
+  }
+
+  return pageImages;
 }
 
 async function analyzePage({
