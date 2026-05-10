@@ -3,7 +3,6 @@
 import {
   Building2,
   CheckCircle2,
-  ClipboardCheck,
   FileText,
   Layers3,
   Loader2,
@@ -165,11 +164,20 @@ type SplitterResult = {
 
 const defaultSteps: AgentStep[] = [
   { name: "PDF intake", state: "idle" },
-  { name: "Sheet splitting", state: "idle" },
-  { name: "Vision extraction", state: "idle" },
-  { name: "Rooms, doors, windows", state: "idle" },
-  { name: "BCBC comparison", state: "idle" },
-  { name: "Report ready", state: "idle" }
+  { name: "Sheet split", state: "idle" },
+  { name: "Page storage", state: "idle" },
+  { name: "Plan reading", state: "idle" },
+  { name: "Code review", state: "idle" },
+  { name: "Final report", state: "idle" }
+];
+
+const stepDescriptions = [
+  "Receives the uploaded permit package.",
+  "Splits the PDF into individual review pages.",
+  "Stores prepared pages for the current report run.",
+  "Reads rooms, openings, dimensions, notes, and drawing context.",
+  "Checks the extracted information against BCBC review rules.",
+  "Compiles the findings into a readable precheck report."
 ];
 
 export default function Home() {
@@ -235,7 +243,7 @@ export default function Home() {
       detail:
         statusMessage ||
         (file
-          ? "Click Create BCBC report to split the plan set, extract measurements, and compare against the local BCBC skill."
+          ? "Click Create BCBC report to split the plan set, prepare pages, read measurements, and check against BCBC review rules."
           : "Drop a permit PDF to begin. Progress will stay visible here while each agent runs.")
     };
   }, [file, isRunning, result, statusMessage, steps]);
@@ -269,9 +277,9 @@ export default function Home() {
     }));
   }
 
-  async function postPipelineAction(action: "full") {
+  async function postPipelineAction() {
     const formData = new FormData();
-    formData.append("action", action);
+    formData.append("action", "full");
     if (file) formData.append("file", file);
 
     const response = await fetch("/api/sheet-splitter", {
@@ -296,15 +304,15 @@ export default function Home() {
     setRunningAction("complete");
     setResult(null);
     setError("");
-    setStatusMessage("Starting complete BCBC report...");
+    setStatusMessage("Starting complete permit precheck...");
     setSteps(defaultSteps.map((step, index) => ({ ...step, state: index === 0 ? "done" : index === 1 ? "running" : "idle" })));
 
     const stageMessages = [
-      "Splitting PDF into sheets...",
-      "Extracting sheet data with vision...",
-      "Extracting room measurements...",
-      "Extracting door and window tags...",
-      "Comparing against BCBC skill...",
+      "Splitting PDF into review pages...",
+      "Storing prepared pages for this report...",
+      "Reading drawing content and measurements...",
+      "Finding rooms, doors, and windows...",
+      "Checking BCBC review rules...",
       "Compiling report..."
     ];
     let stageIndex = 0;
@@ -321,7 +329,7 @@ export default function Home() {
     }, 4500);
 
     try {
-      await postPipelineAction("full");
+      await postPipelineAction();
       setSteps(defaultSteps.map((step) => ({ ...step, state: "done" })));
       setStatusMessage("Report complete. Rooms, openings, and BCBC checks are ready.");
     } catch (runError) {
@@ -360,7 +368,7 @@ export default function Home() {
             Agents
           </a>
           <a href="#output">
-            <ClipboardCheck size={18} />
+            <CheckCircle2 size={18} />
             Output
           </a>
         </nav>
@@ -368,8 +376,8 @@ export default function Home() {
         <div className="ruleBox">
           <ShieldCheck size={18} />
           <div>
-            <strong>Skill loader</strong>
-            <span>BCBC checks staged for downstream agents.</span>
+            <strong>Review engine</strong>
+            <span>BCBC checks staged for every report.</span>
           </div>
         </div>
       </aside>
@@ -382,7 +390,7 @@ export default function Home() {
           </div>
           <button className="ghostButton" type="button">
             <Sparkles size={18} />
-            Claude vision + local BCBC skills
+            Intelligent plan review
           </button>
         </header>
 
@@ -552,17 +560,22 @@ export default function Home() {
                 {isRunning ? <Loader2 className="spin" size={22} /> : <ShieldCheck size={22} />}
               </div>
               <div>
+                <span className="activeLabel">{progressState.activeStep ? "Current step" : "Next step"}</span>
                 <strong>{progressState.activeStep?.name ?? progressState.nextStep?.name ?? "Report ready"}</strong>
                 <p>{progressState.detail}</p>
+                {progressState.nextStep && progressState.activeStep ? (
+                  <em>Next: {progressState.nextStep.name}</em>
+                ) : null}
               </div>
             </div>
 
-            <div className="progressTimeline">
+            <div className="workflowFlow" aria-label="Permit review workflow">
               {steps.map((step, index) => (
-                <article className={`progressStep ${step.state}`} key={`progress-${step.name}`}>
-                  <span>{index + 1}</span>
+                <article className={`flowNode ${step.state}`} key={`progress-${step.name}`}>
+                  <span className="flowIndex">{index + 1}</span>
                   <div>
                     <strong>{step.name}</strong>
+                    <p>{stepDescriptions[index]}</p>
                     <small>
                       {step.state === "done"
                         ? "Complete"
@@ -579,22 +592,67 @@ export default function Home() {
 
             <div className="behindScenes">
               <div>
-                <strong>Saved sheets</strong>
-                <span>Reuses split pages during testing.</span>
+                <strong>Prepared sheets</strong>
+                <span>Plan pages stay available during the review.</span>
               </div>
               <div>
-                <strong>Claude vision</strong>
-                <span>Extracts rooms, dimensions, doors, and windows.</span>
+                <strong>Drawing intelligence</strong>
+                <span>Reads rooms, dimensions, doors, and windows.</span>
               </div>
               <div>
-                <strong>BCBC skill</strong>
-                <span>Compares extracted data against local review rules.</span>
+                <strong>Code checks</strong>
+                <span>Compares findings against BCBC review rules.</span>
               </div>
             </div>
           </section>
         </div>
 
         <section className="resultsBand" id="output">
+          {result ? (
+            <div className="compiledReportPanel">
+              <div className="resultsHeader">
+                <div>
+                  <p className="eyebrow">Compiled precheck report</p>
+                  <h2>Permit review package is ready</h2>
+                </div>
+                <div className="score">
+                  <strong>{reportSummary.flags}</strong>
+                  <span>flags</span>
+                </div>
+              </div>
+              <p className="summaryText">
+                The PDF was split into review pages, drawing data was extracted, rooms and openings were checked, and
+                BCBC review findings were compiled below.
+              </p>
+              <div className="compiledReportStats">
+                <div>
+                  <strong>{reportSummary.sheets}</strong>
+                  <span>sheets reviewed</span>
+                </div>
+                <div>
+                  <strong>{reportSummary.rooms}</strong>
+                  <span>rooms found</span>
+                </div>
+                <div>
+                  <strong>{reportSummary.tags}</strong>
+                  <span>openings found</span>
+                </div>
+                <div>
+                  <strong>{reportSummary.pass}</strong>
+                  <span>passed checks</span>
+                </div>
+                <div>
+                  <strong>{reportSummary.verify}</strong>
+                  <span>needs verification</span>
+                </div>
+                <div>
+                  <strong>{reportSummary.flags}</strong>
+                  <span>flagged checks</span>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           {result?.roomMeasurements ? (
             <div className="roomMeasurementsPanel">
               <div className="resultsHeader">

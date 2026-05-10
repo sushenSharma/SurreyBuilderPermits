@@ -142,6 +142,7 @@ const SHEET_EXTRACTION_CONCURRENCY = 1;
 const OUTPUT_ROOT = join(process.cwd(), "output");
 const SURREY_SKILL_ROOT = join(process.cwd(), "skills", "surrey-plan-precheck");
 const DIMENSIONS_SKILL_PATH = join(process.cwd(), "skills", "bcbc-dimensions", "SKILL.md");
+const BCBC_2024_SKILL_PATH = join(process.cwd(), "skills", "bc-building-code-2024", "SKILL.md");
 const OFFICIAL_SOURCES = {
   surreyBylaws: "https://www.surrey.ca/city-government/bylaws",
   surreyRegulatoryBylaws: "https://www.surrey.ca/city-government/bylaws/regulatory-bylaws",
@@ -156,6 +157,202 @@ const BASE_SYSTEM = `You are an expert architectural drawing analyst.
 Your job is to extract every piece of data from an architectural drawing sheet into structured JSON.
 CRITICAL: Never round, summarize, or paraphrase dimension values.
 "9'2\\" x 11'10\\"" must appear exactly as written. "7½\\"" stays as "7½\\"" not "7.5 inches".`;
+
+const BCBC_PAGE_CHECK_PROMPT = `You are an experienced BC Building Code 2024 Plan Checker (Plans Examiner)
+operating under Division B, Part 9 of the British Columbia Building Code 2024
+(Housing and Small Buildings). You have deep knowledge of all requirements in
+Sections 9.3 through 9.8 as captured in your skill reference file.
+
+When the user uploads a floor plan, elevation drawing, or section drawing,
+you will conduct a systematic plan check exactly as a municipal plans examiner
+would. Your review must be thorough, structured, and code-referenced.
+
+## YOUR REVIEW PROCESS
+
+### STEP 1 — Drawing Intake & Identification
+Before checking anything, identify and state:
+- Type of drawing submitted (floor plan, elevation, section, site plan)
+- Which floor or level it represents (basement, main floor, upper floor, etc.)
+- Apparent occupancy type (single dwelling unit, house with secondary suite,
+  multi-unit residential, etc.)
+- Scale or dimensions visible on the drawing
+- What information appears to be missing that would be needed for a complete
+  plan check (e.g. ceiling heights not noted, stair dimensions absent, etc.)
+
+### STEP 2 — Systematic Code Review
+
+Work through each category below in order. For every item:
+- STATE the requirement (cite the exact Article and Sentence)
+- STATE what you observe on the drawing
+- GIVE A VERDICT: PASS / FAIL / CANNOT DETERMINE (if information is missing)
+- If FAIL: state exactly what needs to be corrected
+- If CANNOT DETERMINE: state exactly what additional information is needed
+
+#### 2A — Room Dimensions and Ceiling Heights (Section 9.5.3, Table 9.5.3.1)
+Check every labeled room or space:
+- Minimum ceiling height for each room type
+- Minimum area over which ceiling height must be provided
+- Clear heights where applicable (e.g. other bedroom spaces, 2.0 m clear)
+- Unfinished basement clear height (2.1 m under beams and in passages)
+- Storage garage clear height (minimum 2.0 m)
+- Mezzanine ceiling heights above and below (2.1 m each, non-residential)
+
+#### 2B — Hallway Widths (Section 9.5.4)
+- Minimum unobstructed hallway width (860 mm general)
+- Permitted 710 mm reduction conditions (only bedrooms/bathrooms at end,
+  second exit provided)
+
+#### 2C — Doorway Sizes (Section 9.5.5, Table 9.5.5.1)
+Check every door shown on the plan:
+- Required entrance to dwelling unit (810 mm wide × 1 980 mm high)
+- Vestibule/entrance hall (810 × 1 980)
+- Exterior-to-basement passage (810 × 1 980)
+- Walk-in closet (610 × 1 980)
+- Bathroom/WC/shower room (610 × 1 980)
+- Rooms off 710 mm hallways (610 × 1 980)
+- All other rooms and exterior balconies (760 × 1 980)
+- Public WC rooms (810 wide × 2 030 high)
+- Doorways to rooms with bathtub/shower/WC served by 860 mm hallway
+  (at least one door ≥ 760 mm wide)
+
+#### 2D — Stair Dimensions (Section 9.8)
+If stairs are shown or referenced:
+- Stair width (860 mm for dwelling unit; 900 mm for residential exit/public)
+- Clear height over stairs (1 950 mm for dwelling unit; 2 050 mm general)
+- Riser height (max 200 mm / min 125 mm private; max 180 mm / min 125 mm public)
+- Tread run (max 355 mm / min 255 mm private; min 280 mm public)
+- Maximum flight height (3.7 m)
+- Minimum risers in interior flights (3, except within dwelling unit)
+- Winder configuration compliance if winders are shown
+- Tread nosing requirements (6–14 mm rounded/beveled)
+- Open risers (only permitted for dwelling units, fire escapes, maintenance,
+  service rooms, industrial non-storage)
+- Stair configuration (straight, curved, winders — confirm permitted type)
+
+#### 2E — Landings (Section 9.8.6)
+- Landing required at top and bottom of each flight
+- Landing required where door opens onto stair or ramp
+- Landing dimensions (at least as wide and long as stair width)
+- Where turn < 90°: length need not exceed lesser of required stair width
+  or 1 100 mm
+- Slope of landing (must not exceed 1 in 50)
+- Clear height over landing (2 050 mm general; 1 950 mm dwelling unit)
+- Permitted omissions (door swings away at top; secondary entrance ≤ 3 risers;
+  bottom of exterior stair with no obstruction within 900/1 100 mm)
+
+#### 2F — Handrails (Section 9.8.7, Table 9.8.7.1)
+- Number of sides required (refer to Table 9.8.7.1 — stair width,
+  curved vs straight, location)
+- Not required thresholds (≤ 2 interior risers; ≤ 3 exterior risers;
+  ramp rise ≤ 400 mm — for dwelling unit only)
+- Handrail height range (865 mm to 1 070 mm)
+- Continuity (continuously graspable from bottom riser to top riser)
+- 300 mm horizontal extension beyond top and bottom of flight
+  (not required for single dwelling unit)
+- Clearance behind handrail (≥ 50 mm; 60 mm if rough/abrasive surface)
+- 750 mm from natural path of travel (where stair serves > 2 dwelling units)
+
+#### 2G — Guards (Section 9.8.8)
+- Guard required where elevation difference > 600 mm within 1.2 m
+  of walking surface
+- Applies to: stairs, ramps, landings, porches, balconies, mezzanines,
+  galleries, raised walkways
+- Doors: where floor > 600 mm above other side (guard or 100 mm max opening)
+- Openable windows: guard or tool-releasable mechanism limiting opening
+  to ≤ 100 mm (unless bottom edge > 900 mm above floor, or > 1 800 mm
+  above exterior grade)
+- Glazing over stairs/ramps/landings:
+  - General buildings: guard required if glazing extends < 1 070 mm above
+    tread/ramp/landing surface
+  - Dwelling units: guard required if glazing extends < 900 mm above
+    tread/ramp/landing surface
+  - Public areas above second storey: guard or withstand balcony loads
+    if glazing < 1 m from floor
+
+#### 2H — Windows, Doors and Skylights (Section 9.7)
+- Main entrance door: door viewer, transparent glazing, or sidelight required
+- Thermal break required in metal frames (unless storm window/door or
+  fire-rated)
+- Sliding doors: pin-lock mechanism ≥ 9 mm throw (or ASTM F842 Grade 10);
+  panel not removable when locked
+- Swinging entry doors: solid core or stile-and-rail, ≥ 45 mm thick;
+  deadbolt ≥ 5 pins, bolt ≥ 25 mm throw; hinge screws ≥ 2 per hinge
+  penetrating ≥ 30 mm into solid wood; strikeplate screws ≥ 30 mm into wood;
+  solid blocking at lock height; outswing doors need non-removable hinges
+- Windows within 2 m of ground level: must meet AAMA/WDMA/CSA 101/I.S.2/A440
+  Clause 5.3.6 forced entry resistance
+- All windows/doors/skylights sealed to air barriers
+
+#### 2I — Glass and Glazing (Section 9.6)
+- Glass sidelights > 500 mm wide: must be safety (tempered/laminated) or
+  wired glass
+- Entrance door glass > 0.5 m² extending < 900 mm from door bottom:
+  safety or wired glass
+- Shower/bathtub enclosure: Class A CAN/CGSB-12.1 safety glazing
+- Transparent panels mistakable for egress: barriers or railings required
+- Public-accessible glass/transparent doors: hardware making existence apparent
+
+#### 2J — Accessible Design (Section 9.5.2)
+- Every building shall comply with Section 3.8 (flag if not residential
+  single-family)
+- Apartment buildings: accessible path through all common spaces of
+  entrance storeys
+- Note floor levels exempt from accessible path (not served by elevator/ramp,
+  not entrance level, no unique common facilities)
+
+### STEP 3 — Summary Table
+
+Produce a clean summary table at the end:
+
+| Item | Code Reference | Observation | Verdict |
+|------|---------------|-------------|---------|
+| [Each checked item] | [Article X.X.X.X] | [What drawing shows] | PASS / FAIL / N/D |
+
+### STEP 4 — Deficiency List
+
+List ALL items that received a FAIL verdict, formatted as a numbered
+deficiency notice exactly as a city would issue it:
+
+DEFICIENCY #1
+Code Reference: Article X.X.X.X, Sentence (X)
+Requirement: [State the code requirement]
+Observed Condition: [What the drawing shows]
+Required Correction: [Exactly what must be changed on the drawing]
+
+### STEP 5 — Items Not Determinable
+
+List all CANNOT DETERMINE items and state exactly what information or
+additional drawing (e.g. section, elevation, reflected ceiling plan,
+door schedule) must be provided before those items can be checked.
+
+### STEP 6 — Overall Result
+
+State one of:
+- APPROVED — No deficiencies found. Drawing complies with BCBC 2024
+  Division B Part 9 for all checked items.
+- REVISIONS REQUIRED — [X] deficiencies found. Resubmit corrected
+  drawings addressing all items in the Deficiency List above.
+- INCOMPLETE SUBMISSION — Insufficient information to complete plan check.
+  Provide the additional information listed in Step 5 before resubmission.
+
+## IMPORTANT RULES FOR YOUR REVIEW
+
+1. Always cite the exact Article number and Sentence when stating a
+   requirement. Never state a code requirement without its citation.
+2. Never guess dimensions. If a dimension is not shown on the drawing,
+   mark it CANNOT DETERMINE — do not assume it complies.
+3. Be conservative. When in doubt, flag it. A plans examiner's job is
+   to protect the safety of future occupants.
+4. Do not approve what you cannot see. Only mark PASS when the drawing
+   clearly shows compliance.
+5. Note any reserved sentences (e.g. 9.7.3.1 Sentence 1 is reserved)
+   and skip them without comment.
+6. If the drawing shows something clearly non-compliant even if not in
+   the checklist above, flag it anyway.
+7. State your occupancy assumption at the top and note that the review
+   is limited to Part 9 (Housing and Small Buildings). If the building
+   appears to be non-residential or mixed-use, flag that Part 3 review
+   may also be required.`;
 
 const pageMetadataSchema = {
   type: "object",
@@ -459,10 +656,10 @@ async function sortedPageImages(runDir: string) {
   const files = await readdir(pagesDir);
 
   return files
-    .filter((file) => file.endsWith(".png"))
+    .filter((file) => /\.(png|jpe?g|webp)$/i.test(file))
     .sort((a, b) => {
-      const aPage = Number(a.match(/(\d+)\.png$/)?.[1] ?? 0);
-      const bPage = Number(b.match(/(\d+)\.png$/)?.[1] ?? 0);
+      const aPage = Number(a.match(/(\d+)\.(png|jpe?g|webp)$/i)?.[1] ?? 0);
+      const bPage = Number(b.match(/(\d+)\.(png|jpe?g|webp)$/i)?.[1] ?? 0);
       return aPage - bPage;
     })
     .map((file) => join(pagesDir, file));
@@ -679,7 +876,13 @@ function stripDataUrlPrefix(value: string) {
 
 async function pageBytesFromLambdaItem(item: unknown) {
   if (item && typeof item === "object") {
-    const url = (item as Record<string, unknown>).url;
+    const objectItem = item as Record<string, unknown>;
+    const url =
+      objectItem.url ??
+      objectItem.signedUrl ??
+      objectItem.presignedUrl ??
+      objectItem.downloadUrl ??
+      objectItem.s3Url;
 
     if (typeof url === "string" && url) {
       const response = await fetch(url);
@@ -771,11 +974,7 @@ async function analyzePage({
   dpi: number;
 }) {
   const imageBase64 = (await readFile(imagePath)).toString("base64");
-  const mediaType = imagePath.toLowerCase().endsWith(".jpg") || imagePath.toLowerCase().endsWith(".jpeg")
-    ? "image/jpeg"
-    : imagePath.toLowerCase().endsWith(".webp")
-      ? "image/webp"
-      : "image/png";
+  const mediaType = imageMediaType(imagePath);
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -834,6 +1033,177 @@ async function analyzePage({
   return { ...(input as PageSheetMetadata), page };
 }
 
+function imageExtension(imagePath: string) {
+  const lower = imagePath.toLowerCase();
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "jpg";
+  if (lower.endsWith(".webp")) return "webp";
+  return "png";
+}
+
+function imageMediaType(imagePath: string) {
+  const extension = imageExtension(imagePath);
+  if (extension === "jpg") return "image/jpeg";
+  if (extension === "webp") return "image/webp";
+  return "image/png";
+}
+
+function responseTextFromClaude(payload: unknown) {
+  if (!payload || typeof payload !== "object") return "";
+
+  const content = (payload as { content?: unknown }).content;
+  if (!Array.isArray(content)) return "";
+
+  return content
+    .map((block) => {
+      if (block && typeof block === "object" && (block as { type?: unknown }).type === "text") {
+        const text = (block as { text?: unknown }).text;
+        return typeof text === "string" ? text : "";
+      }
+
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+async function savedPageFiles() {
+  const pagesDir = join(latestRunDir(), "pages");
+  const files = await readdir(pagesDir);
+
+  return files
+    .filter((file) => /\.(png|jpe?g|webp)$/i.test(file))
+    .sort((first, second) => {
+      const firstPage = Number(first.match(/(\d+)\.(png|jpe?g|webp)$/i)?.[1] ?? 0);
+      const secondPage = Number(second.match(/(\d+)\.(png|jpe?g|webp)$/i)?.[1] ?? 0);
+      return firstPage - secondPage;
+    });
+}
+
+function pageNumberFromValue(value: string) {
+  const match = value.match(/(\d+)/);
+  const pageNumber = Number(match?.[1] ?? 3);
+  return Number.isFinite(pageNumber) && pageNumber > 0 ? pageNumber : 3;
+}
+
+function pageSlug(pageNumber: number) {
+  return `page-${String(pageNumber).padStart(2, "0")}`;
+}
+
+async function resolveLocalPageImage(pageValue: string) {
+  const pagesDir = join(latestRunDir(), "pages");
+  const files = await savedPageFiles();
+  const pageNumber = pageNumberFromValue(pageValue);
+  const pageFile =
+    files.find((file) => new RegExp(`^page-0*${pageNumber}\\.(png|jpe?g|webp)$`, "i").test(file)) ??
+    files.find((file) => new RegExp(`(^|-)0*${pageNumber}\\.(png|jpe?g|webp)$`, "i").test(file));
+
+  if (!pageFile) {
+    throw new Error(`Could not find saved page ${pageNumber} in output/latest/pages.`);
+  }
+
+  return {
+    imagePath: join(pagesDir, pageFile),
+    page: pageSlug(pageNumber)
+  };
+}
+
+async function listSavedPages() {
+  const pagesDir = join(latestRunDir(), "pages");
+  const files = await savedPageFiles();
+
+  return NextResponse.json({
+    savedPages: files.map((file) => {
+      const pageNumber = pageNumberFromValue(file);
+      return {
+        value: pageSlug(pageNumber),
+        label: `Page ${pageNumber}`,
+        imagePath: join(pagesDir, file)
+      };
+    })
+  });
+}
+
+async function runPagePlanCheck(apiKey: string, pageValue: string) {
+  const { imagePath, page } = await resolveLocalPageImage(pageValue);
+  const skillBody = await readFile(BCBC_2024_SKILL_PATH, "utf8");
+  const imageBase64 = (await readFile(imagePath)).toString("base64");
+  const mediaType = imageMediaType(imagePath);
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+      "x-api-key": apiKey
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 8000,
+      system:
+        "You are a municipal plans examiner. Use the supplied BCBC 2024 skill reference as the controlling code source. Return only the plan-check report requested by the user.",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: mediaType,
+                data: imageBase64
+              }
+            },
+            {
+              type: "text",
+              text: `${BCBC_PAGE_CHECK_PROMPT}\n\n---\n\nBCBC 2024 SKILL REFERENCE FILE:\n\n${skillBody}\n\n---\n\nReview this uploaded image. The local file is ${imagePath}.`
+            }
+          ]
+        }
+      ]
+    })
+  });
+
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload?.error?.message ?? `Claude ${page} plan check failed.`);
+  }
+
+  const report = responseTextFromClaude(payload);
+  if (!report) {
+    throw new Error("Claude did not return a text plan-check report.");
+  }
+
+  const outputPath = join(latestRunDir(), `${page}-bcbc-plan-check.md`);
+  await writeFile(outputPath, report);
+
+  return NextResponse.json({
+    pagePlanCheck: {
+      page,
+      imagePath,
+      skillPath: BCBC_2024_SKILL_PATH,
+      outputPath,
+      report
+    }
+  });
+}
+
+async function loadSavedPagePlanCheck(pageValue: string) {
+  const { imagePath, page } = await resolveLocalPageImage(pageValue);
+  const outputPath = join(latestRunDir(), `${page}-bcbc-plan-check.md`);
+  const report = await readFile(outputPath, "utf8");
+
+  return NextResponse.json({
+    pagePlanCheck: {
+      page,
+      imagePath,
+      skillPath: BCBC_2024_SKILL_PATH,
+      outputPath,
+      report
+    }
+  });
+}
+
 async function extractSheet({
   apiKey,
   sheet,
@@ -848,7 +1218,7 @@ async function extractSheet({
       type: "image" as const,
       source: {
         type: "base64" as const,
-        media_type: "image/png" as const,
+        media_type: imageMediaType(pageImages[pageNumber - 1]),
         data: (await readFile(pageImages[pageNumber - 1])).toString("base64")
       }
     }))
@@ -939,15 +1309,24 @@ async function saveSplitArtifacts({
   const sheetsDir = join(runDir, "sheets");
   const extractedDir = join(runDir, "extracted");
   const pagePdfPattern = join(workspace, "pdf-page-%03d.pdf");
+  let pagePdfsAvailable = true;
 
   await mkdir(pagesDir, { recursive: true });
   await mkdir(sheetsDir, { recursive: true });
   await mkdir(extractedDir, { recursive: true });
-  await execFileAsync("pdfseparate", [pdfPath, pagePdfPattern]);
+
+  try {
+    await execFileAsync("pdfseparate", [pdfPath, pagePdfPattern]);
+  } catch {
+    pagePdfsAvailable = false;
+  }
 
   await Promise.all(
     pageImages.map((imagePath, index) =>
-      copyFile(imagePath, join(pagesDir, `page-${String(index + 1).padStart(3, "0")}.png`))
+      copyFile(
+        imagePath,
+        join(pagesDir, `page-${String(index + 1).padStart(3, "0")}.${imageExtension(imagePath)}`)
+      )
     )
   );
 
@@ -978,13 +1357,31 @@ async function saveSplitArtifacts({
         sheet.pages.map((pageNumber) =>
           copyFile(
             pageImages[pageNumber - 1],
-            join(sheetDir, `page-${String(pageNumber).padStart(3, "0")}.png`)
+            join(
+              sheetDir,
+              `page-${String(pageNumber).padStart(3, "0")}.${imageExtension(pageImages[pageNumber - 1])}`
+            )
           )
         )
       );
 
-      const pagePdfs = sheet.pages.map((pageNumber) => join(workspace, `pdf-page-${String(pageNumber).padStart(3, "0")}.pdf`));
-      await execFileAsync("pdfunite", [...pagePdfs, join(sheetDir, "sheet.pdf")]);
+      if (pagePdfsAvailable) {
+        const pagePdfs = sheet.pages.map((pageNumber) => join(workspace, `pdf-page-${String(pageNumber).padStart(3, "0")}.pdf`));
+
+        try {
+          await execFileAsync("pdfunite", [...pagePdfs, join(sheetDir, "sheet.pdf")]);
+        } catch {
+          await writeFile(
+            join(sheetDir, "sheet-pdf-note.txt"),
+            "Sheet PDF was not created because pdfunite is unavailable in this runtime."
+          );
+        }
+      } else {
+        await writeFile(
+          join(sheetDir, "sheet-pdf-note.txt"),
+          "Sheet PDF was not created because pdfseparate is unavailable in this runtime."
+        );
+      }
     })
   );
 
@@ -1272,7 +1669,7 @@ async function runFullReportOnTheFly({
   const workspace = await mkdtemp(join(tmpdir(), "permit-precheck-"));
 
   try {
-    const { pageImages, splitResult } = await splitPdfInWorkspace({ file, dpi, apiKey, workspace });
+    const { pdfPath, pageImages, splitResult } = await splitPdfInWorkspace({ file, dpi, apiKey, workspace });
     const extracted = (await mapWithConcurrency(splitResult.sheets, SHEET_EXTRACTION_CONCURRENCY, (sheet) =>
       extractSheet({
         apiKey,
@@ -1285,10 +1682,20 @@ async function runFullReportOnTheFly({
     const openings = buildOpeningReport(extracted, sources);
     const dimensions = buildDimensionReport(extracted);
     const precheck = buildPrecheckReport(extracted);
+    const artifacts = await saveSplitArtifacts({
+      file,
+      dpi,
+      pdfPath,
+      workspace,
+      pageImages,
+      splitResult,
+      extracted
+    });
 
     return NextResponse.json(
       toClientPayload({
         splitResult,
+        artifacts,
         extracted,
         roomMeasurements,
         openings,
@@ -2704,10 +3111,19 @@ export async function POST(request: Request) {
   const formData = await request.formData();
   const action = String(formData.get("action") ?? "full");
   const file = formData.get("file");
+  const pageValue = String(formData.get("page") ?? "page-03");
   const dpiValue = Number(formData.get("dpi") ?? DEFAULT_DPI);
   const dpi = Number.isFinite(dpiValue) ? Math.min(Math.max(dpiValue, 100), MAX_DPI) : DEFAULT_DPI;
 
   try {
+    if (action === "listSavedPages") {
+      return await listSavedPages();
+    }
+
+    if (action === "loadPagePlanCheck" || action === "loadPage03PlanCheck") {
+      return await loadSavedPagePlanCheck(pageValue);
+    }
+
     if (!apiKey) {
       return NextResponse.json(
         {
@@ -2716,6 +3132,10 @@ export async function POST(request: Request) {
         },
         { status: 500 }
       );
+    }
+
+    if (action === "pagePlanCheck" || action === "page03PlanCheck") {
+      return await runPagePlanCheck(apiKey, pageValue);
     }
 
     if (file instanceof File) {

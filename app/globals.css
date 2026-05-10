@@ -301,6 +301,36 @@ h2 {
   margin-top: 14px;
 }
 
+.reportPagePicker {
+  align-items: center;
+  background: #f8f9f6;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 150px;
+  min-height: 46px;
+  padding: 8px 10px;
+}
+
+.reportPagePicker span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.reportPagePicker select {
+  appearance: none;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  font-weight: 800;
+  min-height: 34px;
+  padding: 0 10px;
+}
+
 .advancedActions {
   display: grid;
   gap: 8px;
@@ -525,19 +555,37 @@ h2 {
 }
 
 .activeWork strong,
-.activeWork p {
+.activeWork p,
+.activeWork em,
+.activeLabel {
   display: block;
+}
+
+.activeLabel {
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
 }
 
 .activeWork strong {
   color: var(--green);
   font-size: 18px;
+  margin-top: 2px;
 }
 
 .activeWork p {
   color: var(--muted);
   line-height: 1.45;
   margin: 5px 0 0;
+}
+
+.activeWork em {
+  color: var(--ink);
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 800;
+  margin-top: 8px;
 }
 
 .activePulse {
@@ -558,71 +606,110 @@ h2 {
   color: #ffffff;
 }
 
-.progressTimeline {
+.workflowFlow {
   display: grid;
-  gap: 10px;
+  gap: 18px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  position: relative;
 }
 
-.progressStep {
-  align-items: center;
+.flowNode {
   background: #f8f9f6;
   border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--muted);
   display: grid;
-  gap: 12px;
-  grid-template-columns: 34px 1fr 22px;
-  min-height: 62px;
-  padding: 10px 12px;
+  gap: 10px;
+  grid-template-columns: 38px 1fr 20px;
+  min-height: 122px;
+  padding: 14px;
+  position: relative;
 }
 
-.progressStep > span {
+.flowNode::after {
+  background: var(--line);
+  content: "";
+  height: 2px;
+  left: calc(100% + 1px);
+  position: absolute;
+  top: 32px;
+  width: 16px;
+}
+
+.flowNode:nth-child(3)::after,
+.flowNode:last-child::after {
+  display: none;
+}
+
+.flowNode:nth-child(3)::before {
+  border-bottom: 2px solid var(--line);
+  border-right: 2px solid var(--line);
+  bottom: -19px;
+  content: "";
+  height: 18px;
+  position: absolute;
+  right: 18px;
+  width: calc(200% + 36px);
+}
+
+.flowIndex {
   align-items: center;
   background: #e8ece7;
   border-radius: 8px;
   color: #45514d;
   display: flex;
   font-weight: 900;
-  height: 34px;
+  height: 38px;
   justify-content: center;
-  width: 34px;
+  width: 38px;
 }
 
-.progressStep strong,
-.progressStep small {
+.flowNode strong,
+.flowNode p,
+.flowNode small {
   display: block;
 }
 
-.progressStep strong {
+.flowNode strong {
   color: var(--ink);
+  line-height: 1.2;
 }
 
-.progressStep small {
+.flowNode p {
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
-  margin-top: 3px;
+  font-size: 13px;
+  line-height: 1.35;
+  margin: 5px 0;
+}
+
+.flowNode small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
   text-transform: uppercase;
 }
 
-.progressStep.running {
-  background: #e7f1fb;
-  border-color: #adc9e5;
-  color: var(--blue);
+.flowNode.running {
+  background: #edf5f2;
+  border-color: #9cd1c3;
+  box-shadow: 0 12px 28px rgba(12, 124, 103, 0.12);
 }
 
-.progressStep.running > span {
-  background: #d6e7f8;
-  color: var(--blue);
+.flowNode.running .flowIndex {
+  background: var(--green);
+  color: #ffffff;
 }
 
-.progressStep.done {
-  background: var(--green-soft);
-  border-color: #a8d9cb;
+.flowNode.running strong {
   color: var(--green);
 }
 
-.progressStep.done > span {
+.flowNode.done {
+  background: var(--green-soft);
+  border-color: #a8d9cb;
+}
+
+.flowNode.done .flowIndex {
   background: #c2e5da;
   color: var(--green);
 }
@@ -659,6 +746,46 @@ h2 {
 
 .resultsBand {
   margin-top: 18px;
+}
+
+.compiledReportPanel {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.compiledReportStats {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.compiledReportStats div {
+  background: #f8f9f6;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.compiledReportStats strong,
+.compiledReportStats span {
+  display: block;
+}
+
+.compiledReportStats strong {
+  color: var(--ink);
+  font-size: 24px;
+}
+
+.compiledReportStats span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.25;
+  margin-top: 5px;
+  text-transform: uppercase;
 }
 
 .compactButton {
@@ -1181,6 +1308,478 @@ h2 {
   margin-top: 10px;
 }
 
+.planCheckPanel {
+  border-top: 1px solid var(--line);
+  margin-top: 18px;
+  padding-top: 18px;
+}
+
+.planReport {
+  display: grid;
+  gap: 16px;
+  margin-top: 14px;
+}
+
+.planReportHero {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 1fr 150px;
+  padding: 18px;
+}
+
+.planReportHero h3,
+.missingInfoPanel h3,
+.deficiencyPanel h3,
+.reviewCategoryPanel h3 {
+  font-size: 22px;
+  line-height: 1.2;
+  margin: 10px 0 0;
+}
+
+.planReportHero p {
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 8px 0 0;
+  max-width: 780px;
+}
+
+.resultPill {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  padding: 7px 10px;
+  text-transform: uppercase;
+}
+
+.resultPill.pass {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.resultPill.fail {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.resultPill.unknown {
+  background: #fff8e8;
+  color: #805000;
+}
+
+.verdictDonut {
+  align-items: center;
+  border-radius: 50%;
+  display: flex;
+  height: 132px;
+  justify-content: center;
+  justify-self: end;
+  width: 132px;
+}
+
+.verdictDonut > div {
+  align-items: center;
+  background: #ffffff;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  height: 86px;
+  justify-content: center;
+  width: 86px;
+}
+
+.verdictDonut strong,
+.verdictDonut span {
+  display: block;
+}
+
+.verdictDonut strong {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.verdictDonut span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  margin-top: 4px;
+  text-transform: uppercase;
+}
+
+.planReportStats {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.planReportStats div {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.planReportStats span,
+.planReportStats strong {
+  display: block;
+}
+
+.planReportStats span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.planReportStats strong {
+  color: var(--ink);
+  font-size: 22px;
+  margin-top: 5px;
+}
+
+.planReportStats .overallCard strong {
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.planReportStats .pass {
+  border-color: #a8d9cb;
+  background: var(--green-soft);
+}
+
+.planReportStats .fail {
+  border-color: #efb8ad;
+  background: var(--red-soft);
+}
+
+.planReportStats .unknown,
+.planReportStats .deficiency {
+  border-color: #f0d39a;
+  background: #fff8e8;
+}
+
+.reportInsightGrid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.factCard {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-height: 104px;
+  padding: 14px;
+}
+
+.factCard span,
+.factCard strong {
+  display: block;
+}
+
+.factCard span {
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.factCard strong {
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.45;
+  margin-top: 8px;
+}
+
+.concernCard,
+.missingInfoPanel,
+.deficiencyPanel,
+.reviewCategoryPanel {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.concernCard {
+  background: #fff8e8;
+  border-left: 5px solid var(--amber);
+}
+
+.concernCard span {
+  color: #805000;
+  display: block;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.concernCard p {
+  color: var(--ink);
+  line-height: 1.55;
+  margin: 8px 0 0;
+}
+
+.missingInfoGrid,
+.deficiencyCards {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.missingInfoGrid article,
+.deficiencyCards article {
+  background: #f8f9f6;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-height: 70px;
+  padding: 12px;
+}
+
+.missingInfoGrid article {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 32px 1fr;
+}
+
+.missingInfoGrid span {
+  align-items: center;
+  background: var(--green-soft);
+  border-radius: 8px;
+  color: var(--green);
+  display: flex;
+  font-weight: 900;
+  height: 32px;
+  justify-content: center;
+  width: 32px;
+}
+
+.missingInfoGrid p,
+.deficiencyCards p {
+  color: var(--muted);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.deficiencyCards article {
+  border-left: 5px solid var(--red);
+}
+
+.deficiencyCards strong {
+  color: var(--red);
+  display: block;
+  margin-bottom: 6px;
+}
+
+.reviewCategoryGrid {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.reviewCategoryCard {
+  background: #f8f9f6;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.reviewCategoryCard summary {
+  align-items: center;
+  cursor: pointer;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1fr auto;
+  list-style: none;
+  padding: 14px;
+}
+
+.reviewCategoryCard summary::-webkit-details-marker {
+  display: none;
+}
+
+.reviewCategoryCard summary > span {
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.reviewCategoryCard summary div {
+  display: flex;
+  gap: 6px;
+}
+
+.reviewCategoryCard summary strong {
+  border-radius: 999px;
+  font-size: 12px;
+  min-width: 34px;
+  padding: 5px 8px;
+  text-align: center;
+}
+
+.reviewCategoryCard summary .pass {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.reviewCategoryCard summary .fail {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.reviewCategoryCard summary .unknown {
+  background: #fff8e8;
+  color: #805000;
+}
+
+.reviewCategoryBody {
+  background: #ffffff;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.rawReportDisclosure {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.rawReportDisclosure > summary {
+  color: var(--green);
+  cursor: pointer;
+  font-weight: 900;
+  padding: 14px;
+}
+
+.planReportBody {
+  background: #ffffff;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  max-height: 820px;
+  overflow: auto;
+  padding: 18px;
+}
+
+.planReportBody h2,
+.planReportBody h3,
+.planReportBody h4 {
+  margin: 0;
+}
+
+.planReportBody h2 {
+  font-size: 24px;
+}
+
+.planReportBody h3 {
+  border-top: 1px solid var(--line);
+  font-size: 18px;
+  padding-top: 14px;
+}
+
+.planReportBody h4 {
+  color: var(--green);
+  font-size: 15px;
+}
+
+.planReportBody p,
+.planReportBody li {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.planReportBody p {
+  margin: 0;
+}
+
+.planReportBody ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.planReportBody strong {
+  color: var(--ink);
+}
+
+.planReportBody hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 4px 0;
+}
+
+.planReportTableWrap {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: auto;
+}
+
+.planReportTable {
+  border-collapse: collapse;
+  min-width: 760px;
+  width: 100%;
+}
+
+.planReportTable th {
+  background: var(--green-soft);
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 900;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.planReportTable th,
+.planReportTable td {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 12px;
+  vertical-align: top;
+}
+
+.planReportTable tr:last-child td {
+  border-bottom: 0;
+}
+
+.planReportTable td {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.verdictCell {
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.verdictCell.pass {
+  color: var(--green);
+}
+
+.verdictCell.fail {
+  color: var(--red);
+}
+
+.verdictCell.unknown {
+  color: #805000;
+}
+
+.deficiencyLead {
+  background: var(--red-soft);
+  border-left: 5px solid var(--red);
+  border-radius: 8px;
+  color: var(--red) !important;
+  font-weight: 900;
+  padding: 10px 12px;
+}
+
 .spin {
   animation: spin 900ms linear infinite;
 }
@@ -1208,8 +1807,22 @@ h2 {
     grid-template-columns: 1fr;
   }
 
+  .workflowFlow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .flowNode:nth-child(3)::after {
+    display: block;
+  }
+
+  .flowNode:nth-child(2n)::after,
+  .flowNode:nth-child(3)::before {
+    display: none;
+  }
+
   .advancedActions,
-  .reportOverview {
+  .reportOverview,
+  .compiledReportStats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1249,8 +1862,15 @@ h2 {
   }
 
   .behindScenes,
+  .workflowFlow,
+  .compiledReportStats,
   .handoffGrid {
     grid-template-columns: 1fr;
+  }
+
+  .flowNode::after,
+  .flowNode:nth-child(3)::before {
+    display: none;
   }
 
   .extractionItem dl {
