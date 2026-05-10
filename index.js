@@ -1,13 +1,17 @@
 const { execFile } = require("node:child_process");
-const { mkdtemp, readFile, readdir, rm, writeFile } = require("node:fs/promises");
+const { mkdtemp, readFile, readdir, rm, stat, writeFile } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
-const { join } = require("node:path");
+const { basename, join } = require("node:path");
 const { promisify } = require("node:util");
+const { GetObjectCommand, PutObjectCommand, S3Client } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 const execFileAsync = promisify(execFile);
 const MAX_PDF_BYTES = 32 * 1024 * 1024;
 const DEFAULT_DPI = 200;
 const MAX_DPI = 300;
+const SIGNED_URL_EXPIRES_SECONDS = 60 * 60;
+const s3 = new S3Client({});
 
 function corsHeaders() {
   return {
@@ -26,6 +30,29 @@ function jsonResponse(statusCode, body) {
     },
     body: JSON.stringify(body)
   };
+}
+
+function safeName(value) {
+  return String(value || "permit.pdf")
+    .replace(/\.[^.]+$/, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "permit";
+}
+
+function outputBucket() {
+  return process.env.PDF_PAGE_BUCKET || process.env.S3_BUCKET || process.env.BUCKET_NAME || "";
+}
+
+function outputPrefix(filename) {
+  const configuredPrefix = process.env.PDF_PAGE_PREFIX || "permit-precheck";
+  const runId =
+    typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  return `${configuredPrefix.replace(/^\/+|\/+$/g, "")}/${safeName(filename)}/${runId}`;
 }
 
 function headerValue(headers, name) {
@@ -146,6 +173,36 @@ async function rasterizePdf(pdfPath, outputPrefix, dpi) {
     .map((file) => join(outputDir, file));
 }
 
+async function uploadPageImage({ bucket, key, imagePath }) {
+  const body = await readFile(imagePath);
+  const size = (await stat(imagePath)).size;
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: body,
+      ContentType: "image/jpeg"
+    })
+  );
+
+  const signedUrl = await getSignedUrl(
+    s3,
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: key
+    }),
+    { expiresIn: SIGNED_URL_EXPIRES_SECONDS }
+  );
+
+  return {
+    s3Url: `s3://${bucket}/${key}`,
+    signedUrl,
+    mediaType: "image/jpeg",
+    size
+  };
+}
+
 async function handleRequest(event) {
   if (event.requestContext?.http?.method === "OPTIONS" || event.httpMethod === "OPTIONS") {
     return {
@@ -158,6 +215,13 @@ async function handleRequest(event) {
   const workspace = await mkdtemp(join(tmpdir(), "pdf-splitter-"));
 
   try {
+    const bucket = outputBucket();
+    if (!bucket) {
+      return jsonResponse(500, {
+        error: "PDF page S3 bucket is not configured. Set PDF_PAGE_BUCKET on the Lambda."
+      });
+    }
+
     const { fields, file } = parseUpload(event);
 
     if (!file?.content?.length) {
@@ -178,20 +242,31 @@ async function handleRequest(event) {
       return jsonResponse(422, { error: "No page images were produced from the PDF." });
     }
 
+    const prefix = outputPrefix(file.filename);
     const pages = await Promise.all(
-      pageImages.map(async (imagePath, index) => ({
-        page: index + 1,
-        mediaType: "image/jpeg",
-        imageBase64: (await readFile(imagePath)).toString("base64")
-      }))
+      pageImages.map(async (imagePath, index) => {
+        const page = index + 1;
+        const key = `${prefix}/page-${String(page).padStart(3, "0")}.jpg`;
+        const upload = await uploadPageImage({ bucket, key, imagePath });
+
+        return {
+          page,
+          bucket,
+          key,
+          ...upload
+        };
+      })
     );
 
     return jsonResponse(200, {
       dpi,
       pageCount: pages.length,
+      bucket,
+      prefix,
       pages
     });
   } catch (error) {
+    console.error("PDF Lambda failed", error);
     return jsonResponse(500, {
       error: error instanceof Error ? error.message : "PDF Lambda failed."
     });
