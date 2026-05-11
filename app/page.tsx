@@ -287,13 +287,25 @@ export default function Home() {
       body: formData
     });
 
-    const payload = await response.json();
+    const responseText = await response.text();
+    let payload: SplitterResult | { error?: string };
 
-    if (!response.ok) {
-      throw new Error(payload.error ?? "Plan precheck failed.");
+    try {
+      payload = responseText ? JSON.parse(responseText) : {};
+    } catch {
+      throw new Error(
+        response.status === 504
+          ? "The report took longer than the production server allowed. The split and analysis steps completed, but final report compilation needs more time."
+          : `Server returned a non-JSON response (${response.status}).`
+      );
     }
 
-    mergeResultPayload(payload);
+    if (!response.ok) {
+      const errorMessage = "error" in payload ? payload.error : "";
+      throw new Error(errorMessage ?? "Plan precheck failed.");
+    }
+
+    mergeResultPayload(payload as SplitterResult);
     return payload;
   }
 
