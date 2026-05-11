@@ -804,6 +804,7 @@ function pdfLambdaUrl() {
   return (
     process.env.PDF_LAMBDA_URL ||
     process.env.NEXT_SERVER_PDF_LAMBDA_URL ||
+    process.env.NEXT_PUBLIC_PDF_LAMBDA_URL ||
     process.env.PDF_SPLITTER_URL ||
     ""
   ).trim();
