@@ -8,6 +8,37 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
+function streamJsonResponse(producer: Promise<NextResponse>) {
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const keepAlive = setInterval(() => {
+        controller.enqueue(encoder.encode("\n"));
+      }, 5000);
+
+      try {
+        controller.enqueue(encoder.encode("\n"));
+        const response = await producer;
+        controller.enqueue(encoder.encode(await response.text()));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Request failed.";
+        controller.enqueue(encoder.encode(JSON.stringify({ error: message })));
+      } finally {
+        clearInterval(keepAlive);
+        controller.close();
+      }
+    }
+  });
+
+  return new Response(stream, {
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store, no-transform"
+    }
+  });
+}
+
 type ClaudeContentBlock =
   | {
       type: "text";
@@ -3432,11 +3463,13 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Missing prepared page URL." }, { status: 400 });
       }
 
-      return await runRemotePageReview({
-        apiKey,
-        pageUrl,
-        page: pageNumberFromValue(pageValue)
-      });
+      return streamJsonResponse(
+        runRemotePageReview({
+          apiKey,
+          pageUrl,
+          page: pageNumberFromValue(pageValue)
+        })
+      );
     }
 
     if (file instanceof File) {

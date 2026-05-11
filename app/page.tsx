@@ -405,6 +405,10 @@ export default function Home() {
       throw new Error(errorMessage ?? "Plan precheck failed.");
     }
 
+    if ("error" in payload && payload.error) {
+      throw new Error(payload.error);
+    }
+
     mergeResultPayload(payload as SplitterResult);
     return payload as SplitterResult;
   }
