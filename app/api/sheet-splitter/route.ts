@@ -768,8 +768,16 @@ function stitchPages(pageResults: PageSheetMetadata[]) {
 }
 
 async function rasterizePdf(pdfPath: string, outputPrefix: string, dpi: number) {
-  if (process.env.PDF_LAMBDA_URL) {
-    return await rasterizePdfWithLambda(pdfPath, outputPrefix, dpi, process.env.PDF_LAMBDA_URL);
+  const lambdaUrl = pdfLambdaUrl();
+
+  if (lambdaUrl) {
+    return await rasterizePdfWithLambda(pdfPath, outputPrefix, dpi, lambdaUrl);
+  }
+
+  if (isHostedRuntime()) {
+    throw new Error(
+      "Missing PDF_LAMBDA_URL in the hosted app environment. Add your Lambda Function URL to Amplify environment variables, redeploy, and confirm amplify.yml writes it into .env.production."
+    );
   }
 
   try {
@@ -790,6 +798,25 @@ async function rasterizePdf(pdfPath: string, outputPrefix: string, dpi: number) 
       return aPage - bPage;
     })
     .map((file) => join(directory, file));
+}
+
+function pdfLambdaUrl() {
+  return (
+    process.env.PDF_LAMBDA_URL ||
+    process.env.NEXT_SERVER_PDF_LAMBDA_URL ||
+    process.env.PDF_SPLITTER_URL ||
+    ""
+  ).trim();
+}
+
+function isHostedRuntime() {
+  return Boolean(
+    process.env.AWS_BRANCH ||
+      process.env.AWS_APP_ID ||
+      process.env.AMPLIFY_APP_ID ||
+      process.env.AWS_EXECUTION_ENV ||
+      process.env.NODE_ENV === "production"
+  );
 }
 
 function normalizeLambdaPayload(payload: unknown): unknown {
@@ -3177,6 +3204,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Upload a PDF file." }, { status: 400 });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "";
+    console.error("sheet-splitter failed", {
+      action,
+      hasFile: file instanceof File,
+      fileName: file instanceof File ? file.name : null,
+      fileSize: file instanceof File ? file.size : null,
+      hasAnthropicKey: Boolean(apiKey),
+      hasPdfLambdaUrl: Boolean(pdfLambdaUrl()),
+      nodeEnv: process.env.NODE_ENV,
+      awsBranch: process.env.AWS_BRANCH,
+      message: errorMessage
+    });
     const isSavedOutputError =
       errorMessage.includes("output/latest") ||
       errorMessage.includes("sheets.json") ||
@@ -3190,7 +3228,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
-        error: friendly
+        error: friendly,
+        diagnostics: {
+          action,
+          hasAnthropicKey: Boolean(apiKey),
+          hasPdfLambdaUrl: Boolean(pdfLambdaUrl()),
+          runtime: isHostedRuntime() ? "hosted" : "local"
+        }
       },
       { status: 500 }
     );
