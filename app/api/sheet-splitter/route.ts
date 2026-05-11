@@ -932,13 +932,15 @@ async function rasterizePdfWithLambda(pdfPath: string, outputPrefix: string, dpi
   await mkdir(directory, { recursive: true });
 
   const pdfBytes = await readFile(pdfPath);
-  const formData = new FormData();
-  formData.append("dpi", String(dpi));
-  formData.append("file", new Blob([pdfBytes], { type: "application/pdf" }), basename(pdfPath));
 
   const response = await fetch(lambdaUrl, {
     method: "POST",
-    body: formData
+    headers: {
+      "content-type": "application/pdf",
+      "x-filename": basename(pdfPath),
+      "x-dpi": String(dpi)
+    },
+    body: pdfBytes
   });
   const responseText = await response.text();
   let payload: unknown;

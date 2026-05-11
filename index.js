@@ -129,6 +129,19 @@ function parseUpload(event) {
   const contentType = headerValue(event.headers, "content-type");
   const buffer = requestBuffer(event);
 
+  if (contentType.includes("application/pdf") || headerValue(event.headers, "x-filename").toLowerCase().endsWith(".pdf")) {
+    return {
+      fields: {
+        dpi: headerValue(event.headers, "x-dpi") || undefined
+      },
+      file: {
+        filename: headerValue(event.headers, "x-filename") || "upload.pdf",
+        contentType: "application/pdf",
+        content: buffer
+      }
+    };
+  }
+
   if (contentType.includes("multipart/form-data")) {
     const boundary = multipartBoundary(contentType);
     if (!boundary) throw new Error("Multipart upload is missing a boundary.");
@@ -137,17 +150,6 @@ function parseUpload(event) {
 
   if (contentType.includes("application/json")) {
     return parseJsonBody(buffer);
-  }
-
-  if (contentType.includes("application/pdf")) {
-    return {
-      fields: {},
-      file: {
-        filename: "upload.pdf",
-        contentType: "application/pdf",
-        content: buffer
-      }
-    };
   }
 
   throw new Error(`Unsupported content type: ${contentType || "missing"}`);
@@ -226,6 +228,12 @@ async function handleRequest(event) {
 
     if (!file?.content?.length) {
       return jsonResponse(400, { error: "Upload a PDF file." });
+    }
+
+    if (file.content.slice(0, 5).toString("ascii") !== "%PDF-") {
+      return jsonResponse(400, {
+        error: "Uploaded file is not a valid PDF. The PDF bytes were not received correctly by the splitter service."
+      });
     }
 
     if (file.content.length > MAX_PDF_BYTES) {
