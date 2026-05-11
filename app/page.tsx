@@ -169,6 +169,19 @@ type SplitterResult = {
     mediaType?: string;
     size?: number;
   }>;
+  job?: {
+    jobId: string;
+    status: "queued" | "running" | "complete" | "error";
+    currentPage: number | null;
+    completedPages: number;
+    totalPages: number;
+    error?: string;
+    pages: Array<{
+      page: number;
+      status: "pending" | "running" | "done" | "error";
+      error?: string;
+    }>;
+  };
 };
 
 const defaultSteps: AgentStep[] = [
@@ -380,7 +393,7 @@ export default function Home() {
     const formData = new FormData();
     formData.append("action", action);
     Object.entries(extra ?? {}).forEach(([key, value]) => formData.append(key, value));
-    if (file && action === "splitRemote") formData.append("file", file);
+    if (file && (action === "splitRemote" || action === "startAsyncReport")) formData.append("file", file);
 
     const response = await fetch("/api/sheet-splitter", {
       method: "POST",
@@ -425,18 +438,37 @@ export default function Home() {
 
     try {
       setStatusMessage("Splitting PDF into prepared review pages...");
-      const splitPayload = await postPipelineAction("splitRemote");
-      const remotePages = splitPayload.remotePages ?? [];
-      mergeResultPayload(splitPayload);
+      const startPayload = await postPipelineAction("startAsyncReport", { dpi: "100" });
+      const jobId = startPayload.job?.jobId;
 
+      if (!jobId) {
+        throw new Error("Report job did not start.");
+      }
+
+      mergeResultPayload(startPayload);
       setSteps(defaultSteps.map((step, index) => ({ ...step, state: index <= 2 ? "done" : index === 3 ? "running" : "idle" })));
 
-      for (const remotePage of remotePages) {
-        setStatusMessage(`Reviewing page ${remotePage.page} of ${remotePages.length}...`);
-        await postPipelineAction("reviewRemotePage", {
-          page: String(remotePage.page),
-          pageUrl: remotePage.url
-        });
+      for (;;) {
+        const statusPayload = await postPipelineAction("asyncReportAdvance", { jobId });
+        const job = statusPayload.job;
+        mergeResultPayload(statusPayload);
+
+        if (!job) {
+          throw new Error("Report job status was not returned.");
+        }
+
+        setStatusMessage(
+          job.status === "complete"
+            ? "Compiling final report..."
+            : `Reviewing pages ${job.completedPages} of ${job.totalPages} complete${
+                job.currentPage ? `, page ${job.currentPage} is running` : ""
+              }...`
+        );
+
+        if (job.status === "complete") break;
+        if (job.status === "error") throw new Error(job.error ?? "Report job failed.");
+
+        await new Promise((resolve) => window.setTimeout(resolve, 5000));
       }
 
       setSteps(defaultSteps.map((step) => ({ ...step, state: "done" })));

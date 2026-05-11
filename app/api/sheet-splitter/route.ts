@@ -3,10 +3,13 @@ import { copyFile, cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
-import { NextResponse } from "next/server";
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { after, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
+
+const jobS3 = new S3Client({});
 
 function streamJsonResponse(producer: Promise<NextResponse>) {
   const encoder = new TextEncoder();
@@ -117,6 +120,34 @@ type RemotePage = {
   s3Url?: string;
   mediaType?: string;
   size?: number;
+};
+
+type AsyncPageStatus = "pending" | "running" | "done" | "error";
+
+type AsyncReportJob = {
+  jobId: string;
+  status: "queued" | "running" | "complete" | "error";
+  createdAt: string;
+  updatedAt: string;
+  sourceFile: string;
+  dpi: number;
+  currentPage: number | null;
+  error?: string;
+  remotePages: RemotePage[];
+  pages: Array<{
+    page: number;
+    url: string;
+    status: AsyncPageStatus;
+    startedAt?: string;
+    completedAt?: string;
+    error?: string;
+  }>;
+  result: SplitResult | null;
+  extraction?: NonNullable<ReturnType<typeof toClientPayload>["extraction"]>;
+  roomMeasurements?: NonNullable<ReturnType<typeof toClientPayload>["roomMeasurements"]>;
+  openings?: NonNullable<ReturnType<typeof toClientPayload>["openings"]>;
+  dimensions?: NonNullable<ReturnType<typeof toClientPayload>["dimensions"]>;
+  precheck?: NonNullable<ReturnType<typeof toClientPayload>["precheck"]>;
 };
 
 type PrecheckIssue = {
@@ -1612,6 +1643,7 @@ function toClientPayload({
       blockerCount: number;
       warningCount: number;
       infoCount: number;
+      clarificationCount?: number;
       notes: string;
     };
     issues: PrecheckIssue[];
@@ -1859,6 +1891,255 @@ async function runRemoteSplitOnly({ file, dpi }: { file: File; dpi: number }) {
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
+}
+
+function asyncJobBucket() {
+  return process.env.PDF_PAGE_BUCKET || "";
+}
+
+function asyncJobPrefix() {
+  return (process.env.PDF_PAGE_PREFIX || "pdf-pages/").replace(/^\/+|\/+$/g, "") + "/jobs";
+}
+
+function asyncJobKey(jobId: string) {
+  return `${asyncJobPrefix()}/${jobId}.json`;
+}
+
+async function readS3Text(bucket: string, key: string) {
+  const object = await jobS3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  return await object.Body?.transformToString();
+}
+
+async function readAsyncJob(jobId: string): Promise<AsyncReportJob> {
+  const bucket = asyncJobBucket();
+  if (!bucket) throw new Error("PDF_PAGE_BUCKET is not configured for async report jobs.");
+  const text = await readS3Text(bucket, asyncJobKey(jobId));
+  if (!text) throw new Error(`Async report job ${jobId} was not found.`);
+  return JSON.parse(text) as AsyncReportJob;
+}
+
+async function writeAsyncJob(job: AsyncReportJob) {
+  const bucket = asyncJobBucket();
+  if (!bucket) throw new Error("PDF_PAGE_BUCKET is not configured for async report jobs.");
+  job.updatedAt = new Date().toISOString();
+  await jobS3.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: asyncJobKey(job.jobId),
+      ContentType: "application/json",
+      Body: JSON.stringify(job)
+    })
+  );
+}
+
+function mergeJobPayload(job: AsyncReportJob, payload: ReturnType<typeof toClientPayload>) {
+  if (!job.result) {
+    job.result = payload as SplitResult;
+  } else {
+    job.result.summary = {
+      sheetCount: (job.result.summary.sheetCount ?? 0) + (payload.summary?.sheetCount ?? 0),
+      needsReview: (job.result.summary.needsReview ?? 0) + (payload.summary?.needsReview ?? 0),
+      notes: payload.summary?.notes ?? job.result.summary.notes
+    };
+    job.result.sheets = [...job.result.sheets, ...(payload.sheets ?? [])];
+    job.result.pages = [...job.result.pages, ...(payload.pages ?? [])];
+    job.result.handoff = {
+      visionExtractor: [
+        ...(job.result.handoff?.visionExtractor ?? []),
+        ...(payload.handoff?.visionExtractor ?? [])
+      ],
+      textExtractor: [...(job.result.handoff?.textExtractor ?? []), ...(payload.handoff?.textExtractor ?? [])],
+      crossSheetRisks: [
+        ...(job.result.handoff?.crossSheetRisks ?? []),
+        ...(payload.handoff?.crossSheetRisks ?? [])
+      ]
+    };
+  }
+
+  if (payload.extraction) {
+    job.extraction = {
+      summary: {
+        extractedSheets:
+          (job.extraction?.summary.extractedSheets ?? 0) + payload.extraction.summary.extractedSheets,
+        notes: payload.extraction.summary.notes
+      },
+      sheets: [...(job.extraction?.sheets ?? []), ...payload.extraction.sheets]
+    };
+  }
+
+  if (payload.roomMeasurements) {
+    job.roomMeasurements = {
+      summary: {
+        roomCount:
+          (job.roomMeasurements?.summary.roomCount ?? 0) + payload.roomMeasurements.summary.roomCount,
+        dimensionedRoomCount:
+          (job.roomMeasurements?.summary.dimensionedRoomCount ?? 0) +
+          payload.roomMeasurements.summary.dimensionedRoomCount,
+        notes: payload.roomMeasurements.summary.notes
+      },
+      rooms: [...(job.roomMeasurements?.rooms ?? []), ...payload.roomMeasurements.rooms]
+    };
+  }
+
+  if (payload.openings) {
+    job.openings = {
+      summary: {
+        tagCount: (job.openings?.summary.tagCount ?? 0) + payload.openings.summary.tagCount,
+        doorCount: (job.openings?.summary.doorCount ?? 0) + payload.openings.summary.doorCount,
+        windowCount: (job.openings?.summary.windowCount ?? 0) + payload.openings.summary.windowCount,
+        passCount: (job.openings?.summary.passCount ?? 0) + payload.openings.summary.passCount,
+        verifyCount: (job.openings?.summary.verifyCount ?? 0) + payload.openings.summary.verifyCount,
+        flagCount: (job.openings?.summary.flagCount ?? 0) + payload.openings.summary.flagCount,
+        notes: payload.openings.summary.notes
+      },
+      tags: [...(job.openings?.tags ?? []), ...payload.openings.tags]
+    };
+  }
+
+  if (payload.dimensions) {
+    job.dimensions = {
+      summary: {
+        passCount: (job.dimensions?.summary.passCount ?? 0) + payload.dimensions.summary.passCount,
+        verifyCount: (job.dimensions?.summary.verifyCount ?? 0) + payload.dimensions.summary.verifyCount,
+        flagCount: (job.dimensions?.summary.flagCount ?? 0) + payload.dimensions.summary.flagCount,
+        notes: payload.dimensions.summary.notes
+      },
+      findings: [...(job.dimensions?.findings ?? []), ...payload.dimensions.findings]
+    };
+  }
+
+  if (payload.precheck) {
+    job.precheck = {
+      summary: {
+        blockerCount: (job.precheck?.summary.blockerCount ?? 0) + payload.precheck.summary.blockerCount,
+        warningCount: (job.precheck?.summary.warningCount ?? 0) + payload.precheck.summary.warningCount,
+        infoCount: (job.precheck?.summary.infoCount ?? 0) + payload.precheck.summary.infoCount,
+        clarificationCount:
+          (job.precheck?.summary.clarificationCount ?? 0) + (payload.precheck.summary.clarificationCount ?? 0),
+        notes: payload.precheck.summary.notes
+      },
+      issues: [...(job.precheck?.issues ?? []), ...payload.precheck.issues]
+    };
+  }
+}
+
+function asyncJobPayload(job: AsyncReportJob) {
+  return {
+    job: {
+      jobId: job.jobId,
+      status: job.status,
+      currentPage: job.currentPage,
+      pages: job.pages,
+      error: job.error,
+      completedPages: job.pages.filter((page) => page.status === "done").length,
+      totalPages: job.pages.length
+    },
+    ...(job.result
+      ? toClientPayload({
+          splitResult: job.result,
+          extracted: job.extraction?.sheets,
+          roomMeasurements: job.roomMeasurements,
+          openings: job.openings,
+          dimensions: job.dimensions,
+          precheck: job.precheck
+        })
+      : placeholderSplitResult(job.remotePages))
+  };
+}
+
+async function processNextAsyncPage(jobId: string, apiKey: string) {
+  const job = await readAsyncJob(jobId);
+  if (job.status === "complete" || job.pages.some((page) => page.status === "running")) return;
+
+  const nextPage = job.pages.find((page) => page.status === "pending");
+  if (!nextPage) {
+    job.status = "complete";
+    job.currentPage = null;
+    await writeAsyncJob(job);
+    return;
+  }
+
+  nextPage.status = "running";
+  nextPage.startedAt = new Date().toISOString();
+  job.status = "running";
+  job.currentPage = nextPage.page;
+  await writeAsyncJob(job);
+
+  try {
+    const response = await runRemotePageReview({ apiKey, pageUrl: nextPage.url, page: nextPage.page });
+    const payload = (await response.json()) as ReturnType<typeof toClientPayload>;
+    const freshJob = await readAsyncJob(jobId);
+    mergeJobPayload(freshJob, payload);
+    const freshPage = freshJob.pages.find((page) => page.page === nextPage.page);
+    if (freshPage) {
+      freshPage.status = "done";
+      freshPage.completedAt = new Date().toISOString();
+    }
+    freshJob.currentPage = null;
+    freshJob.status = freshJob.pages.every((page) => page.status === "done") ? "complete" : "running";
+    await writeAsyncJob(freshJob);
+  } catch (error) {
+    const freshJob = await readAsyncJob(jobId);
+    const freshPage = freshJob.pages.find((page) => page.page === nextPage.page);
+    const message = error instanceof Error ? error.message : "Page review failed.";
+    if (freshPage) {
+      freshPage.status = "error";
+      freshPage.error = message;
+      freshPage.completedAt = new Date().toISOString();
+    }
+    freshJob.currentPage = null;
+    freshJob.status = "error";
+    freshJob.error = message;
+    await writeAsyncJob(freshJob);
+  }
+}
+
+async function runAsyncReportStart({ file, dpi, apiKey }: { file: File; dpi: number; apiKey: string }) {
+  const splitResponse = await runRemoteSplitOnly({ file, dpi });
+  const splitPayload = (await splitResponse.json()) as ReturnType<typeof toClientPayload> & { remotePages?: RemotePage[] };
+  const remotePages = splitPayload.remotePages ?? [];
+
+  if (!remotePages.length) {
+    return NextResponse.json({ error: "No prepared pages were returned by the splitter." }, { status: 422 });
+  }
+
+  const jobId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const job: AsyncReportJob = {
+    jobId,
+    status: "queued",
+    createdAt: now,
+    updatedAt: now,
+    sourceFile: file.name,
+    dpi,
+    currentPage: null,
+    remotePages,
+    pages: remotePages.map((page) => ({
+      page: page.page,
+      url: page.url,
+      status: "pending"
+    })),
+    result: null
+  };
+
+  await writeAsyncJob(job);
+  after(() => processNextAsyncPage(jobId, apiKey));
+
+  return NextResponse.json(asyncJobPayload(job));
+}
+
+async function runAsyncReportStatus(jobId: string) {
+  const job = await readAsyncJob(jobId);
+  return NextResponse.json(asyncJobPayload(job));
+}
+
+async function runAsyncReportAdvance(jobId: string, apiKey: string) {
+  const job = await readAsyncJob(jobId);
+  if (job.status !== "complete" && !job.pages.some((page) => page.status === "running")) {
+    after(() => processNextAsyncPage(jobId, apiKey));
+  }
+
+  return NextResponse.json(asyncJobPayload(job));
 }
 
 async function runRemotePageReview({
@@ -3430,6 +3711,7 @@ export async function POST(request: Request) {
   const formData = await request.formData();
   const action = String(formData.get("action") ?? "full");
   const file = formData.get("file");
+  const jobId = String(formData.get("jobId") ?? "");
   const pageValue = String(formData.get("page") ?? "page-03");
   const pageUrl = String(formData.get("pageUrl") ?? "");
   const dpiValue = Number(formData.get("dpi") ?? DEFAULT_DPI);
@@ -3458,6 +3740,22 @@ export async function POST(request: Request) {
       return await runPagePlanCheck(apiKey, pageValue);
     }
 
+    if (action === "asyncReportStatus") {
+      if (!jobId) {
+        return NextResponse.json({ error: "Missing report job id." }, { status: 400 });
+      }
+
+      return await runAsyncReportStatus(jobId);
+    }
+
+    if (action === "asyncReportAdvance") {
+      if (!jobId) {
+        return NextResponse.json({ error: "Missing report job id." }, { status: 400 });
+      }
+
+      return await runAsyncReportAdvance(jobId, apiKey);
+    }
+
     if (action === "reviewRemotePage") {
       if (!pageUrl) {
         return NextResponse.json({ error: "Missing prepared page URL." }, { status: 400 });
@@ -3483,6 +3781,10 @@ export async function POST(request: Request) {
 
       if (action === "splitRemote") {
         return await runRemoteSplitOnly({ file, dpi });
+      }
+
+      if (action === "startAsyncReport") {
+        return await runAsyncReportStart({ file, dpi, apiKey });
       }
 
       if (action === "split") {
