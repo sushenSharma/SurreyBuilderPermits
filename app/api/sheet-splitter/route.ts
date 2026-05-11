@@ -1833,13 +1833,11 @@ async function runRemoteSplitOnly({ file, dpi }: { file: File; dpi: number }) {
 async function runRemotePageReview({
   apiKey,
   pageUrl,
-  page,
-  dpi
+  page
 }: {
   apiKey: string;
   pageUrl: string;
   page: number;
-  dpi: number;
 }) {
   const workspace = await mkdtemp(join(tmpdir(), "remote-page-review-"));
 
@@ -1854,7 +1852,25 @@ async function runRemotePageReview({
     const imagePath = join(workspace, `page-${String(page).padStart(3, "0")}.${extension}`);
     await writeFile(imagePath, Buffer.from(await response.arrayBuffer()));
 
-    const metadata = await analyzePage({ apiKey, imagePath, page, dpi });
+    const metadata: PageSheetMetadata = {
+      page,
+      sheetNumber: `PAGE-${String(page).padStart(3, "0")}`,
+      title: `Review page ${page}`,
+      scale: "",
+      confidence: 0,
+      status: "review",
+      notes: "Page prepared for detailed review.",
+      detectedElementCounts: {
+        titleBlocks: 0,
+        northArrows: 0,
+        scaleBars: 0,
+        roomLabels: 0,
+        doorTags: 0,
+        windowTags: 0,
+        dimensionStrings: 0
+      },
+      warnings: []
+    };
     const sheet = splitSheetFromPageMetadata(metadata, page);
     const splitResult: SplitResult = {
       summary: {
@@ -3419,8 +3435,7 @@ export async function POST(request: Request) {
       return await runRemotePageReview({
         apiKey,
         pageUrl,
-        page: pageNumberFromValue(pageValue),
-        dpi
+        page: pageNumberFromValue(pageValue)
       });
     }
 
