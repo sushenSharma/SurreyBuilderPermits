@@ -160,6 +160,15 @@ type SplitterResult = {
     };
     tags: OpeningTag[];
   };
+  remotePages?: Array<{
+    page: number;
+    url: string;
+    bucket?: string;
+    key?: string;
+    s3Url?: string;
+    mediaType?: string;
+    size?: number;
+  }>;
 };
 
 const defaultSteps: AgentStep[] = [
@@ -265,22 +274,113 @@ export default function Home() {
     acceptFile(event.dataTransfer.files?.[0]);
   }
 
+  function mergeUniqueBy<T>(current: T[], incoming: T[], keyFor: (item: T) => string) {
+    const map = new Map(current.map((item) => [keyFor(item), item]));
+    incoming.forEach((item) => map.set(keyFor(item), item));
+    return Array.from(map.values());
+  }
+
   function mergeResultPayload(payload: SplitterResult) {
     setResult((current) => ({
       ...(current ?? payload),
       ...payload,
-      extraction: payload.extraction ?? current?.extraction,
-      precheck: payload.precheck ?? current?.precheck,
-      dimensions: payload.dimensions ?? current?.dimensions,
-      roomMeasurements: payload.roomMeasurements ?? current?.roomMeasurements,
-      openings: payload.openings ?? current?.openings
+      sheets: mergeUniqueBy(current?.sheets ?? [], payload.sheets ?? [], (sheet) => sheet.id),
+      remotePages: payload.remotePages ?? current?.remotePages,
+      extraction:
+        payload.extraction || current?.extraction
+          ? {
+              summary: payload.extraction?.summary ?? current?.extraction?.summary ?? { extractedSheets: 0, notes: "" },
+              sheets: mergeUniqueBy(
+                current?.extraction?.sheets ?? [],
+                payload.extraction?.sheets ?? [],
+                (sheet) => sheet.sheet_id
+              )
+            }
+          : undefined,
+      precheck:
+        payload.precheck || current?.precheck
+          ? {
+              summary: {
+                blockerCount:
+                  (current?.precheck?.summary.blockerCount ?? 0) + (payload.precheck?.summary.blockerCount ?? 0),
+                warningCount:
+                  (current?.precheck?.summary.warningCount ?? 0) + (payload.precheck?.summary.warningCount ?? 0),
+                infoCount: (current?.precheck?.summary.infoCount ?? 0) + (payload.precheck?.summary.infoCount ?? 0),
+                clarificationCount:
+                  (current?.precheck?.summary.clarificationCount ?? 0) +
+                  (payload.precheck?.summary.clarificationCount ?? 0),
+                notes: payload.precheck?.summary.notes ?? current?.precheck?.summary.notes ?? ""
+              },
+              issues: [
+                ...(current?.precheck?.issues ?? []),
+                ...(payload.precheck?.issues ?? [])
+              ]
+            }
+          : undefined,
+      dimensions:
+        payload.dimensions || current?.dimensions
+          ? {
+              summary: {
+                passCount:
+                  (current?.dimensions?.summary.passCount ?? 0) + (payload.dimensions?.summary.passCount ?? 0),
+                verifyCount:
+                  (current?.dimensions?.summary.verifyCount ?? 0) + (payload.dimensions?.summary.verifyCount ?? 0),
+                flagCount:
+                  (current?.dimensions?.summary.flagCount ?? 0) + (payload.dimensions?.summary.flagCount ?? 0),
+                notes: payload.dimensions?.summary.notes ?? current?.dimensions?.summary.notes ?? ""
+              },
+              findings: [
+                ...(current?.dimensions?.findings ?? []),
+                ...(payload.dimensions?.findings ?? [])
+              ]
+            }
+          : undefined,
+      roomMeasurements:
+        payload.roomMeasurements || current?.roomMeasurements
+          ? {
+              summary: {
+                roomCount:
+                  (current?.roomMeasurements?.summary.roomCount ?? 0) +
+                  (payload.roomMeasurements?.summary.roomCount ?? 0),
+                dimensionedRoomCount:
+                  (current?.roomMeasurements?.summary.dimensionedRoomCount ?? 0) +
+                  (payload.roomMeasurements?.summary.dimensionedRoomCount ?? 0),
+                notes: payload.roomMeasurements?.summary.notes ?? current?.roomMeasurements?.summary.notes ?? ""
+              },
+              rooms: [
+                ...(current?.roomMeasurements?.rooms ?? []),
+                ...(payload.roomMeasurements?.rooms ?? [])
+              ]
+            }
+          : undefined,
+      openings:
+        payload.openings || current?.openings
+          ? {
+              summary: {
+                tagCount: (current?.openings?.summary.tagCount ?? 0) + (payload.openings?.summary.tagCount ?? 0),
+                doorCount: (current?.openings?.summary.doorCount ?? 0) + (payload.openings?.summary.doorCount ?? 0),
+                windowCount:
+                  (current?.openings?.summary.windowCount ?? 0) + (payload.openings?.summary.windowCount ?? 0),
+                passCount: (current?.openings?.summary.passCount ?? 0) + (payload.openings?.summary.passCount ?? 0),
+                verifyCount:
+                  (current?.openings?.summary.verifyCount ?? 0) + (payload.openings?.summary.verifyCount ?? 0),
+                flagCount: (current?.openings?.summary.flagCount ?? 0) + (payload.openings?.summary.flagCount ?? 0),
+                notes: payload.openings?.summary.notes ?? current?.openings?.summary.notes ?? ""
+              },
+              tags: [
+                ...(current?.openings?.tags ?? []),
+                ...(payload.openings?.tags ?? [])
+              ]
+            }
+          : undefined
     }));
   }
 
-  async function postPipelineAction() {
+  async function postPipelineAction(action = "full", extra?: Record<string, string>): Promise<SplitterResult> {
     const formData = new FormData();
-    formData.append("action", "full");
-    if (file) formData.append("file", file);
+    formData.append("action", action);
+    Object.entries(extra ?? {}).forEach(([key, value]) => formData.append(key, value));
+    if (file && action === "splitRemote") formData.append("file", file);
 
     const response = await fetch("/api/sheet-splitter", {
       method: "POST",
@@ -306,7 +406,7 @@ export default function Home() {
     }
 
     mergeResultPayload(payload as SplitterResult);
-    return payload;
+    return payload as SplitterResult;
   }
 
   async function runCompleteReport() {
@@ -319,29 +419,22 @@ export default function Home() {
     setStatusMessage("Starting complete permit precheck...");
     setSteps(defaultSteps.map((step, index) => ({ ...step, state: index === 0 ? "done" : index === 1 ? "running" : "idle" })));
 
-    const stageMessages = [
-      "Splitting PDF into review pages...",
-      "Storing prepared pages for this report...",
-      "Reading drawing content and measurements...",
-      "Finding rooms, doors, and windows...",
-      "Checking BCBC review rules...",
-      "Compiling report..."
-    ];
-    let stageIndex = 0;
-    const progressTimer = window.setInterval(() => {
-      stageIndex = Math.min(stageIndex + 1, defaultSteps.length - 1);
-      setStatusMessage(stageMessages[stageIndex] ?? "Compiling report...");
-      setSteps((current) =>
-        current.map((step, index) => {
-          if (index < stageIndex) return { ...step, state: "done" };
-          if (index === stageIndex) return { ...step, state: "running" };
-          return { ...step, state: "idle" };
-        })
-      );
-    }, 4500);
-
     try {
-      await postPipelineAction();
+      setStatusMessage("Splitting PDF into prepared review pages...");
+      const splitPayload = await postPipelineAction("splitRemote");
+      const remotePages = splitPayload.remotePages ?? [];
+      mergeResultPayload(splitPayload);
+
+      setSteps(defaultSteps.map((step, index) => ({ ...step, state: index <= 2 ? "done" : index === 3 ? "running" : "idle" })));
+
+      for (const remotePage of remotePages) {
+        setStatusMessage(`Reviewing page ${remotePage.page} of ${remotePages.length}...`);
+        await postPipelineAction("reviewRemotePage", {
+          page: String(remotePage.page),
+          pageUrl: remotePage.url
+        });
+      }
+
       setSteps(defaultSteps.map((step) => ({ ...step, state: "done" })));
       setStatusMessage("Report complete. Rooms, openings, and BCBC checks are ready.");
     } catch (runError) {
@@ -351,7 +444,6 @@ export default function Home() {
         current.map((step) => (step.state === "running" ? { ...step, state: "idle" } : step))
       );
     } finally {
-      window.clearInterval(progressTimer);
       setIsRunning(false);
       setRunningAction("");
     }

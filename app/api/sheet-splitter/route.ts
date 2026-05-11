@@ -78,6 +78,16 @@ type SplitResult = {
   pages: PageSheetMetadata[];
 };
 
+type RemotePage = {
+  page: number;
+  url: string;
+  bucket?: string;
+  key?: string;
+  s3Url?: string;
+  mediaType?: string;
+  size?: number;
+};
+
 type PrecheckIssue = {
   severity: "blocker" | "warning" | "info" | "needs_clarification";
   sheet_id: string;
@@ -893,6 +903,35 @@ function pageMediaTypeFromLambdaItem(item: unknown) {
   return typeof value === "string" && value.startsWith("image/") ? value : "image/png";
 }
 
+function pageUrlFromLambdaItem(item: unknown) {
+  if (!item || typeof item !== "object") return "";
+
+  const objectItem = item as Record<string, unknown>;
+  const url = objectItem.url ?? objectItem.signedUrl ?? objectItem.presignedUrl ?? objectItem.downloadUrl;
+
+  return typeof url === "string" ? url : "";
+}
+
+function remotePagesFromLambdaPayload(payload: unknown): RemotePage[] {
+  return lambdaPageItems(payload)
+    .map((item, index) => {
+      const objectItem = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+      const page = typeof objectItem.page === "number" ? objectItem.page : index + 1;
+      const url = pageUrlFromLambdaItem(item);
+
+      return {
+        page,
+        url,
+        bucket: typeof objectItem.bucket === "string" ? objectItem.bucket : undefined,
+        key: typeof objectItem.key === "string" ? objectItem.key : undefined,
+        s3Url: typeof objectItem.s3Url === "string" ? objectItem.s3Url : undefined,
+        mediaType: pageMediaTypeFromLambdaItem(item),
+        size: typeof objectItem.size === "number" ? objectItem.size : undefined
+      };
+    })
+    .filter((page) => page.url);
+}
+
 function extensionForMediaType(mediaType: string) {
   if (mediaType === "image/jpeg" || mediaType === "image/jpg") return "jpg";
   if (mediaType === "image/webp") return "webp";
@@ -987,6 +1026,38 @@ async function rasterizePdfWithLambda(pdfPath: string, outputPrefix: string, dpi
   }
 
   return pageImages;
+}
+
+async function callPdfLambda(pdfPath: string, dpi: number, lambdaUrl: string) {
+  const pdfBytes = await readFile(pdfPath);
+
+  const response = await fetch(lambdaUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/pdf",
+      "x-filename": basename(pdfPath),
+      "x-dpi": String(dpi)
+    },
+    body: pdfBytes
+  });
+  const responseText = await response.text();
+  let payload: unknown;
+
+  try {
+    payload = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    throw new Error(`PDF Lambda returned non-JSON response: ${responseText.slice(0, 180)}`);
+  }
+
+  if (!response.ok) {
+    const errorMessage =
+      payload && typeof payload === "object" && "error" in payload
+        ? String((payload as { error: unknown }).error)
+        : responseText;
+    throw new Error(`PDF Lambda failed: ${errorMessage}`);
+  }
+
+  return payload;
 }
 
 async function analyzePage({
@@ -1648,6 +1719,180 @@ async function runSplitOnly({
     });
 
     return NextResponse.json(toClientPayload({ splitResult, artifacts }));
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+}
+
+function splitSheetFromPageMetadata(metadata: PageSheetMetadata, page = 1): SplitSheet {
+  return {
+    id: metadata.sheetNumber || `PAGE-${String(page).padStart(3, "0")}`,
+    title: metadata.title || `Review page ${page}`,
+    range: `page ${page}`,
+    confidence: metadata.confidence ?? 0,
+    status: metadata.status ?? "review",
+    notes: metadata.notes ?? "",
+    pages: [1],
+    building: "Unknown",
+    metadata: {
+      scale_main: metadata.scale || null,
+      scale_secondary: null
+    },
+    detected_elements: {
+      dimension_strings: metadata.detectedElementCounts?.dimensionStrings ?? 0,
+      door_tags: metadata.detectedElementCounts?.doorTags ?? 0,
+      window_tags: metadata.detectedElementCounts?.windowTags ?? 0,
+      room_labels: metadata.detectedElementCounts?.roomLabels ?? 0
+    }
+  };
+}
+
+function placeholderSplitResult(remotePages: RemotePage[]): SplitResult {
+  return {
+    summary: {
+      sheetCount: remotePages.length,
+      needsReview: remotePages.length,
+      notes: `Prepared ${remotePages.length} page image(s) for review.`
+    },
+    sheets: remotePages.map((page) => ({
+      id: `PAGE-${String(page.page).padStart(3, "0")}`,
+      title: `Review page ${page.page}`,
+      range: `page ${page.page}`,
+      confidence: 0,
+      status: "review",
+      notes: "Waiting for page review.",
+      pages: [page.page],
+      building: "Unknown",
+      metadata: {
+        scale_main: null,
+        scale_secondary: null
+      },
+      detected_elements: {
+        dimension_strings: 0,
+        door_tags: 0,
+        window_tags: 0,
+        room_labels: 0
+      }
+    })),
+    handoff: {
+      visionExtractor: remotePages.map((page) => `PAGE-${String(page.page).padStart(3, "0")}`),
+      textExtractor: [],
+      crossSheetRisks: []
+    },
+    pages: remotePages.map((page) => ({
+      page: page.page,
+      sheetNumber: `PAGE-${String(page.page).padStart(3, "0")}`,
+      title: `Review page ${page.page}`,
+      scale: "",
+      confidence: 0,
+      status: "review",
+      notes: "Waiting for page review.",
+      detectedElementCounts: {
+        titleBlocks: 0,
+        northArrows: 0,
+        scaleBars: 0,
+        roomLabels: 0,
+        doorTags: 0,
+        windowTags: 0,
+        dimensionStrings: 0
+      },
+      warnings: []
+    }))
+  };
+}
+
+async function runRemoteSplitOnly({ file, dpi }: { file: File; dpi: number }) {
+  const lambdaUrl = pdfLambdaUrl();
+  if (!lambdaUrl) {
+    return NextResponse.json({ error: "PDF splitter service is not configured." }, { status: 500 });
+  }
+
+  const workspace = await mkdtemp(join(tmpdir(), "remote-split-"));
+
+  try {
+    const pdfPath = join(workspace, "input.pdf");
+    await writeFile(pdfPath, Buffer.from(await file.arrayBuffer()));
+    const payload = await callPdfLambda(pdfPath, dpi, lambdaUrl);
+    const remotePages = remotePagesFromLambdaPayload(payload);
+
+    if (!remotePages.length) {
+      throw new Error(`PDF splitter did not return downloadable page images. ${lambdaPayloadSummary(payload)}`);
+    }
+
+    const splitResult = placeholderSplitResult(remotePages);
+
+    return NextResponse.json({
+      ...toClientPayload({ splitResult }),
+      remotePages
+    });
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+}
+
+async function runRemotePageReview({
+  apiKey,
+  pageUrl,
+  page,
+  dpi
+}: {
+  apiKey: string;
+  pageUrl: string;
+  page: number;
+  dpi: number;
+}) {
+  const workspace = await mkdtemp(join(tmpdir(), "remote-page-review-"));
+
+  try {
+    const response = await fetch(pageUrl);
+    if (!response.ok) {
+      throw new Error(`Prepared page ${page} could not be downloaded for review: ${response.status}`);
+    }
+
+    const contentType = response.headers.get("content-type") ?? "image/jpeg";
+    const extension = extensionForMediaType(contentType);
+    const imagePath = join(workspace, `page-${String(page).padStart(3, "0")}.${extension}`);
+    await writeFile(imagePath, Buffer.from(await response.arrayBuffer()));
+
+    const metadata = await analyzePage({ apiKey, imagePath, page, dpi });
+    const sheet = splitSheetFromPageMetadata(metadata, page);
+    const splitResult: SplitResult = {
+      summary: {
+        sheetCount: 1,
+        needsReview: sheet.status === "ready" ? 0 : 1,
+        notes: `Reviewed page ${page}.`
+      },
+      sheets: [{ ...sheet, range: `page ${page}` }],
+      handoff: {
+        visionExtractor: [sheet.id],
+        textExtractor: [sheet.id],
+        crossSheetRisks: sheet.status === "ready" ? [] : [`${sheet.id} needs confirmation before downstream checks.`]
+      },
+      pages: [metadata]
+    };
+    const extracted = [
+      await extractSheet({
+        apiKey,
+        sheet,
+        pageImages: [imagePath]
+      })
+    ] as Array<Record<string, unknown>>;
+    const sources = extractionSources(splitResult);
+    const roomMeasurements = buildRoomMeasurementReport(extracted, sources);
+    const openings = buildOpeningReport(extracted, sources);
+    const dimensions = buildDimensionReport(extracted);
+    const precheck = buildPrecheckReport(extracted);
+
+    return NextResponse.json(
+      toClientPayload({
+        splitResult,
+        extracted,
+        roomMeasurements,
+        openings,
+        dimensions,
+        precheck
+      })
+    );
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -3139,6 +3384,7 @@ export async function POST(request: Request) {
   const action = String(formData.get("action") ?? "full");
   const file = formData.get("file");
   const pageValue = String(formData.get("page") ?? "page-03");
+  const pageUrl = String(formData.get("pageUrl") ?? "");
   const dpiValue = Number(formData.get("dpi") ?? DEFAULT_DPI);
   const dpi = Number.isFinite(dpiValue) ? Math.min(Math.max(dpiValue, 100), MAX_DPI) : DEFAULT_DPI;
 
@@ -3165,6 +3411,19 @@ export async function POST(request: Request) {
       return await runPagePlanCheck(apiKey, pageValue);
     }
 
+    if (action === "reviewRemotePage") {
+      if (!pageUrl) {
+        return NextResponse.json({ error: "Missing prepared page URL." }, { status: 400 });
+      }
+
+      return await runRemotePageReview({
+        apiKey,
+        pageUrl,
+        page: pageNumberFromValue(pageValue),
+        dpi
+      });
+    }
+
     if (file instanceof File) {
       if (file.type !== "application/pdf") {
         return NextResponse.json({ error: "Only PDF files are supported." }, { status: 400 });
@@ -3172,6 +3431,10 @@ export async function POST(request: Request) {
 
       if (file.size > MAX_FILE_BYTES) {
         return NextResponse.json({ error: "PDF must be 32MB or smaller for this first pass." }, { status: 413 });
+      }
+
+      if (action === "splitRemote") {
+        return await runRemoteSplitOnly({ file, dpi });
       }
 
       if (action === "split") {
