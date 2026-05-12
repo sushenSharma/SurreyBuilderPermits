@@ -11,6 +11,15 @@ export const maxDuration = 300;
 
 const jobS3 = new S3Client({});
 
+declare global {
+  var permitAsyncReportJobs: Map<string, AsyncReportJob> | undefined;
+}
+
+function memoryJobs() {
+  globalThis.permitAsyncReportJobs ??= new Map<string, AsyncReportJob>();
+  return globalThis.permitAsyncReportJobs;
+}
+
 function streamJsonResponse(producer: Promise<NextResponse>) {
   const encoder = new TextEncoder();
 
@@ -1911,25 +1920,38 @@ async function readS3Text(bucket: string, key: string) {
 }
 
 async function readAsyncJob(jobId: string): Promise<AsyncReportJob> {
+  const memoryJob = memoryJobs().get(jobId);
+  if (memoryJob) return memoryJob;
+
   const bucket = asyncJobBucket();
   if (!bucket) throw new Error("PDF_PAGE_BUCKET is not configured for async report jobs.");
   const text = await readS3Text(bucket, asyncJobKey(jobId));
   if (!text) throw new Error(`Async report job ${jobId} was not found.`);
-  return JSON.parse(text) as AsyncReportJob;
+  const job = JSON.parse(text) as AsyncReportJob;
+  memoryJobs().set(jobId, job);
+  return job;
 }
 
 async function writeAsyncJob(job: AsyncReportJob) {
+  memoryJobs().set(job.jobId, job);
   const bucket = asyncJobBucket();
-  if (!bucket) throw new Error("PDF_PAGE_BUCKET is not configured for async report jobs.");
+  if (!bucket) return;
   job.updatedAt = new Date().toISOString();
-  await jobS3.send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: asyncJobKey(job.jobId),
-      ContentType: "application/json",
-      Body: JSON.stringify(job)
-    })
-  );
+  try {
+    await jobS3.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: asyncJobKey(job.jobId),
+        ContentType: "application/json",
+        Body: JSON.stringify(job)
+      })
+    );
+  } catch (error) {
+    console.warn("Could not persist async report job to S3; using in-memory job store.", {
+      jobId: job.jobId,
+      message: error instanceof Error ? error.message : String(error)
+    });
+  }
 }
 
 function mergeJobPayload(job: AsyncReportJob, payload: ReturnType<typeof toClientPayload>) {
