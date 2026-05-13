@@ -1,11 +1,13 @@
 :root {
-  --bg: #f3f1ec;
+  --bg: #f5f2eb;
   --panel: #ffffff;
   --ink: #18211f;
   --muted: #64706c;
   --line: #d9ddd5;
   --green: #0c7c67;
   --green-soft: #d9efe7;
+  --green-veil: #f0faf6;
+  --cream: #fbf8f0;
   --blue: #315f90;
   --amber: #b36b00;
   --amber-soft: #fff0d1;
@@ -51,7 +53,9 @@ button:disabled {
 }
 
 .sidebar {
-  background: #14201d;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
+    #14201d;
   color: #eef5ef;
   display: flex;
   flex-direction: column;
@@ -67,7 +71,7 @@ button:disabled {
 
 .brandMark {
   align-items: center;
-  background: #1f3b35;
+  background: #22423b;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
   display: flex;
@@ -86,7 +90,7 @@ button:disabled {
 .brand span,
 .ruleBox span {
   color: #b7c5bf;
-  font-size: 13px;
+  font-size: 14px;
   margin-top: 3px;
 }
 
@@ -104,6 +108,7 @@ button:disabled {
   min-height: 42px;
   padding: 10px 12px;
   text-decoration: none;
+  font-weight: 800;
 }
 
 .nav a.active,
@@ -125,7 +130,7 @@ button:disabled {
 
 .workspace {
   min-width: 0;
-  padding: 30px;
+  padding: 34px 30px;
 }
 
 .topbar {
@@ -151,15 +156,23 @@ p {
 }
 
 h1 {
-  font-size: 34px;
+  font-size: 40px;
   line-height: 1.15;
-  margin-bottom: 0;
+  margin-bottom: 8px;
 }
 
 h2 {
   font-size: 20px;
   line-height: 1.25;
   margin-bottom: 0;
+}
+
+.topbarCopy {
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.45;
+  margin: 0;
+  max-width: 760px;
 }
 
 .ghostButton,
@@ -177,8 +190,10 @@ h2 {
   background: var(--panel);
   border: 1px solid var(--line);
   color: var(--ink);
+  font-weight: 800;
   min-height: 42px;
   padding: 0 14px;
+  white-space: nowrap;
 }
 
 .iconButton {
@@ -190,8 +205,8 @@ h2 {
 
 .contentGrid {
   display: grid;
-  gap: 18px;
-  grid-template-columns: minmax(340px, 470px) minmax(0, 1fr);
+  gap: 22px;
+  grid-template-columns: minmax(360px, 500px) minmax(0, 1fr);
 }
 
 .intakePanel,
@@ -203,7 +218,7 @@ h2 {
 }
 
 .intakePanel {
-  padding: 20px;
+  padding: 22px;
 }
 
 .panelHeader,
@@ -221,7 +236,7 @@ h2 {
   display: flex;
   justify-content: center;
   margin-top: 18px;
-  min-height: 210px;
+  min-height: 230px;
   padding: 22px;
   transition:
     background 160ms ease,
@@ -234,7 +249,7 @@ h2 {
 
 .dropzone.dragging,
 .dropzone.hasFile {
-  background: var(--green-soft);
+  background: linear-gradient(180deg, var(--green-soft), #ecfaf5);
   border-color: var(--green);
 }
 
@@ -253,7 +268,12 @@ h2 {
 
 .emptyDrop strong {
   color: var(--ink);
-  font-size: 20px;
+  font-size: 22px;
+}
+
+.emptyDrop span {
+  font-size: 16px;
+  line-height: 1.35;
 }
 
 .fileSummary {
@@ -268,6 +288,7 @@ h2 {
 
 .fileSummary strong {
   color: var(--ink);
+  font-size: 16px;
   line-height: 1.25;
   overflow-wrap: anywhere;
 }
@@ -283,16 +304,59 @@ h2 {
   color: #ffffff;
   font-weight: 800;
   min-height: 48px;
+  transition:
+    background 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
   width: 100%;
 }
 
 .magicButton {
   font-size: 17px;
-  min-height: 56px;
+  box-shadow: 0 10px 24px rgba(12, 124, 103, 0.2);
+  min-height: 58px;
+}
+
+.runButton:not(:disabled):hover {
+  background: #096f5b;
+  box-shadow: 0 14px 30px rgba(12, 124, 103, 0.24);
+  transform: translateY(-1px);
 }
 
 .runButton:disabled {
   background: #aeb8b2;
+  box-shadow: none;
+  transform: none;
+}
+
+.builderPromise {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.builderPromise div {
+  align-items: center;
+  background: var(--cream);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  display: flex;
+  gap: 8px;
+  min-height: 52px;
+  padding: 10px;
+}
+
+.builderPromise svg {
+  color: var(--green);
+  flex: 0 0 auto;
+}
+
+.builderPromise span {
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.25;
 }
 
 .workflowButtons {
@@ -404,7 +468,7 @@ h2 {
 .reportOverview {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-top: 10px;
 }
 
@@ -452,8 +516,8 @@ h2 {
 
 .pipeline {
   display: grid;
-  gap: 8px;
-  margin-top: 18px;
+  gap: 9px;
+  margin-top: 20px;
 }
 
 .step {
@@ -466,7 +530,7 @@ h2 {
   gap: 10px;
   grid-template-columns: 28px 1fr 20px;
   min-height: 44px;
-  padding: 8px 10px;
+  padding: 10px;
 }
 
 .step span {
@@ -499,7 +563,7 @@ h2 {
   flex-direction: column;
   gap: 18px;
   min-height: 470px;
-  padding: 22px;
+  padding: 24px;
 }
 
 .progressHeader {
@@ -511,7 +575,7 @@ h2 {
 
 .progressBadge {
   align-items: center;
-  background: #f8f9f6;
+  background: var(--cream);
   border: 1px solid var(--line);
   border-radius: 8px;
   display: flex;
@@ -545,13 +609,13 @@ h2 {
 
 .activeWork {
   align-items: center;
-  background: #edf5f2;
+  background: linear-gradient(180deg, #eef8f4, #f7fcfa);
   border: 1px solid #c5ded6;
   border-radius: 8px;
   display: grid;
-  gap: 14px;
-  grid-template-columns: 48px 1fr;
-  padding: 16px;
+  gap: 16px;
+  grid-template-columns: 56px 1fr;
+  padding: 18px;
 }
 
 .activeWork strong,
@@ -570,12 +634,13 @@ h2 {
 
 .activeWork strong {
   color: var(--green);
-  font-size: 18px;
+  font-size: 23px;
   margin-top: 2px;
 }
 
 .activeWork p {
   color: var(--muted);
+  font-size: 16px;
   line-height: 1.45;
   margin: 5px 0 0;
 }
@@ -595,9 +660,9 @@ h2 {
   border-radius: 8px;
   color: var(--green);
   display: flex;
-  height: 48px;
+  height: 56px;
   justify-content: center;
-  width: 48px;
+  width: 56px;
 }
 
 .activePulse.running {
@@ -608,8 +673,8 @@ h2 {
 
 .workflowFlow {
   display: grid;
-  gap: 18px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   position: relative;
 }
 
@@ -619,37 +684,19 @@ h2 {
   border-radius: 8px;
   color: var(--muted);
   display: grid;
-  gap: 10px;
-  grid-template-columns: 38px 1fr 20px;
-  min-height: 122px;
-  padding: 14px;
+  gap: 12px;
+  grid-template-columns: 48px 1fr auto;
+  min-height: 104px;
+  padding: 16px;
   position: relative;
 }
 
 .flowNode::after {
-  background: var(--line);
-  content: "";
-  height: 2px;
-  left: calc(100% + 1px);
-  position: absolute;
-  top: 32px;
-  width: 16px;
-}
-
-.flowNode:nth-child(3)::after,
-.flowNode:last-child::after {
   display: none;
 }
 
 .flowNode:nth-child(3)::before {
-  border-bottom: 2px solid var(--line);
-  border-right: 2px solid var(--line);
-  bottom: -19px;
-  content: "";
-  height: 18px;
-  position: absolute;
-  right: 18px;
-  width: calc(200% + 36px);
+  display: none;
 }
 
 .flowIndex {
@@ -659,9 +706,9 @@ h2 {
   color: #45514d;
   display: flex;
   font-weight: 900;
-  height: 38px;
+  height: 48px;
   justify-content: center;
-  width: 38px;
+  width: 48px;
 }
 
 .flowNode strong,
@@ -672,12 +719,13 @@ h2 {
 
 .flowNode strong {
   color: var(--ink);
+  font-size: 18px;
   line-height: 1.2;
 }
 
 .flowNode p {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.35;
   margin: 5px 0;
 }
@@ -722,7 +770,7 @@ h2 {
 }
 
 .behindScenes div {
-  background: #f8f9f6;
+  background: var(--cream);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 14px;
@@ -1894,11 +1942,7 @@ h2 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .flowNode:nth-child(3)::after {
-    display: block;
-  }
-
-  .flowNode:nth-child(2n)::after,
+  .flowNode::after,
   .flowNode:nth-child(3)::before {
     display: none;
   }
@@ -1945,6 +1989,7 @@ h2 {
   }
 
   .behindScenes,
+  .builderPromise,
   .workflowFlow,
   .compiledReportStats,
   .handoffGrid {

@@ -223,21 +223,27 @@ type SplitterResult = {
 };
 
 const defaultSteps: AgentStep[] = [
-  { name: "PDF intake", state: "idle" },
-  { name: "Sheet split", state: "idle" },
-  { name: "Page storage", state: "idle" },
-  { name: "Plan reading", state: "idle" },
-  { name: "Code review", state: "idle" },
-  { name: "Final report", state: "idle" }
+  { name: "Upload plans", state: "idle" },
+  { name: "Split sheets", state: "idle" },
+  { name: "Save pages", state: "idle" },
+  { name: "Read drawings", state: "idle" },
+  { name: "Check BCBC", state: "idle" },
+  { name: "Build report", state: "idle" }
 ];
 
 const stepDescriptions = [
-  "Receives the uploaded permit package.",
-  "Splits the PDF into individual review pages.",
-  "Stores prepared pages for the current report run.",
-  "Reads rooms, openings, dimensions, notes, and drawing context.",
-  "Checks the extracted information against BCBC review rules.",
-  "Compiles the findings into a readable precheck report."
+  "Gets your permit PDF ready.",
+  "Separates the plan set into individual sheets.",
+  "Keeps each sheet available while the review runs.",
+  "Looks for rooms, stairs, doors, windows, notes, and dimensions.",
+  "Compares visible plan information with BCBC 2024 checks.",
+  "Turns the findings into a builder-friendly action list."
+];
+
+const builderPromise = [
+  "No manual sheet sorting",
+  "Checks every page it can read",
+  "Clear fix-or-confirm report"
 ];
 
 const pdfLambdaUrl = process.env.NEXT_PUBLIC_PDF_LAMBDA_URL ?? "";
@@ -329,12 +335,12 @@ export default function Home() {
       activeStep,
       nextStep,
       percent,
-      title: isRunning ? "Working behind the scenes" : result ? "BCBC report ready" : "Ready for a permit PDF",
+      title: isRunning ? "Checking your plan set" : result ? "Your precheck report is ready" : "Ready to review your plans",
       detail:
         statusMessage ||
         (file
-          ? "Click Create BCBC report to split the plan set, prepare pages, read measurements, and check against BCBC review rules."
-          : "Drop a permit PDF to begin. Progress will stay visible here while each agent runs.")
+          ? "Click Start plan check. We will split the plan set, read each sheet, and prepare a clear list of items to fix or confirm."
+          : "Drop a permit PDF to begin. You will see each stage light up as the review moves forward.")
     };
   }, [file, isRunning, result, statusMessage, steps]);
 
@@ -531,26 +537,26 @@ export default function Home() {
     setRunningAction("complete");
     setResult(null);
     setError("");
-    setStatusMessage("Starting complete permit precheck...");
+    setStatusMessage("Starting your permit precheck...");
     setSteps(defaultSteps.map((step, index) => ({ ...step, state: index === 0 ? "done" : index === 1 ? "running" : "idle" })));
 
     try {
-      setStatusMessage("Splitting PDF into prepared review pages...");
+      setStatusMessage("Splitting the plan set into individual sheets...");
       const splitPayload = await postPipelineAction("splitRemote", { dpi: "100" });
       const remotePages = splitPayload.remotePages ?? [];
       mergeResultPayload(splitPayload);
       setSteps(defaultSteps.map((step, index) => ({ ...step, state: index <= 2 ? "done" : index === 3 ? "running" : "idle" })));
 
       for (const remotePage of remotePages) {
-        setStatusMessage(`Reviewing page ${remotePage.page} of ${remotePages.length} against BCBC rules...`);
+        setStatusMessage(`Reading sheet ${remotePage.page} of ${remotePages.length} and checking visible BCBC items...`);
         const pageReview = await reviewS3Page(remotePage);
         mergeResultPayload({ ...splitPayload, pageReviews: [pageReview] });
       }
 
-      setStatusMessage("Consolidating page reviews into final report...");
+      setStatusMessage("Building your final precheck report...");
 
       setSteps(defaultSteps.map((step) => ({ ...step, state: "done" })));
-      setStatusMessage("Report complete. Rooms, openings, and BCBC checks are ready.");
+      setStatusMessage("Report complete. Review the fix-or-confirm items below.");
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : "Plan precheck failed.");
       setStatusMessage("");
@@ -571,31 +577,31 @@ export default function Home() {
             <Building2 size={22} />
           </div>
           <div>
-            <strong>Permit Precheck</strong>
-            <span>BCBC 2024 ready</span>
+            <strong>Builder Precheck</strong>
+            <span>BCBC 2024 support</span>
           </div>
         </div>
 
         <nav className="nav">
           <a className="active" href="#intake">
             <UploadCloud size={18} />
-            Intake
+            Upload
           </a>
-          <a href="#agents">
+          <a href="#review">
             <Layers3 size={18} />
-            Agents
+            Review
           </a>
           <a href="#output">
             <CheckCircle2 size={18} />
-            Output
+            Report
           </a>
         </nav>
 
         <div className="ruleBox">
           <ShieldCheck size={18} />
           <div>
-            <strong>Review engine</strong>
-            <span>BCBC checks staged for every report.</span>
+            <strong>Plain-language results</strong>
+            <span>Find likely city comments before submission.</span>
           </div>
         </div>
       </aside>
@@ -603,12 +609,16 @@ export default function Home() {
       <section className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Permit plan intelligence</p>
-            <h1>Drop a plan set. Get a BCBC precheck report.</h1>
+            <p className="eyebrow">Permit plan precheck</p>
+            <h1>Catch permit issues before city review.</h1>
+            <p className="topbarCopy">
+              Upload your plan set. We split the sheets, read the drawings, and return a builder-friendly BCBC
+              checklist.
+            </p>
           </div>
           <button className="ghostButton" type="button">
             <Sparkles size={18} />
-            Intelligent plan review
+            BCBC 2024 precheck
           </button>
         </header>
 
@@ -616,8 +626,8 @@ export default function Home() {
           <section className="intakePanel" id="intake">
             <div className="panelHeader">
               <div>
-                <p className="eyebrow">One click report</p>
-                <h2>Upload permit PDF</h2>
+                <p className="eyebrow">Start here</p>
+                <h2>Upload your plan set</h2>
               </div>
               {file ? (
                 <button
@@ -656,22 +666,31 @@ export default function Home() {
                   <FileText size={38} />
                   <div>
                     <strong>{file.name}</strong>
-                    <span>{fileSize} PDF queued for room, opening, and BCBC review</span>
+                    <span>{fileSize} PDF ready for sheet review and BCBC precheck</span>
                   </div>
                 </div>
               ) : (
                 <div className="emptyDrop">
                   <UploadCloud size={42} />
-                  <strong>Drop permit PDF</strong>
-                  <span>or choose a file from this machine</span>
+                  <strong>Drop your permit PDF</strong>
+                  <span>or choose the plan set from this computer</span>
                 </div>
               )}
             </label>
 
+            <div className="builderPromise">
+              {builderPromise.map((item) => (
+                <div key={item}>
+                  <CheckCircle2 size={16} />
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+
             <div className="workflowButtons">
               <button className="runButton magicButton" type="button" disabled={!file || isRunning} onClick={runCompleteReport}>
                 {runningAction === "complete" ? <Loader2 className="spin" size={20} /> : <Sparkles size={20} />}
-                Create BCBC report
+                Start plan check
               </button>
             </div>
             {statusMessage ? (
@@ -745,7 +764,7 @@ export default function Home() {
             ) : null}
             {error ? <p className="errorText">{error}</p> : null}
 
-            <div className="pipeline" id="agents">
+            <div className="pipeline" id="review">
               {steps.map((step, index) => (
                 <div className={`step ${step.state}`} key={step.name}>
                   <span>{index + 1}</span>
@@ -760,7 +779,7 @@ export default function Home() {
           <section className="progressPanel" aria-live="polite">
             <div className="progressHeader">
               <div>
-                <p className="eyebrow">Report progress</p>
+                <p className="eyebrow">Review progress</p>
                 <h2>{progressState.title}</h2>
               </div>
               <div className="progressBadge">
@@ -810,16 +829,16 @@ export default function Home() {
 
             <div className="behindScenes">
               <div>
-                <strong>Prepared sheets</strong>
-                <span>Plan pages stay available during the review.</span>
+                <strong>What you get</strong>
+                <span>A concise list of likely city-review items.</span>
               </div>
               <div>
-                <strong>Drawing intelligence</strong>
-                <span>Reads rooms, dimensions, doors, and windows.</span>
+                <strong>What it checks</strong>
+                <span>Rooms, dimensions, doors, windows, notes, and missing information.</span>
               </div>
               <div>
-                <strong>Code checks</strong>
-                <span>Compares findings against BCBC review rules.</span>
+                <strong>How to use it</strong>
+                <span>Fix flagged items or confirm anything marked needs information.</span>
               </div>
             </div>
           </section>
@@ -831,7 +850,7 @@ export default function Home() {
               <div className="resultsHeader">
                 <div>
                   <p className="eyebrow">Compiled precheck report</p>
-                  <h2>Permit review package is ready</h2>
+                  <h2>Your builder precheck is ready</h2>
                 </div>
                 <div className="score">
                   <strong>{reportSummary.flags}</strong>
@@ -840,7 +859,7 @@ export default function Home() {
               </div>
               <p className="summaryText">
                 The PDF was split into review pages, drawing data was extracted, rooms and openings were checked, and
-                BCBC review findings were compiled below.
+                likely BCBC review items were organized below.
               </p>
               <div className="compiledReportStats">
                 <div>
@@ -877,7 +896,7 @@ export default function Home() {
                 <div>
                   <p className="eyebrow">BCBC page review</p>
                   <h2>
-                    {planCheckSummary.pages} pages checked, {planCheckSummary.deficiencies} deficiencies found
+                    {planCheckSummary.pages} pages checked, {planCheckSummary.deficiencies} likely deficiencies found
                   </h2>
                 </div>
                 <div className="score">
@@ -886,7 +905,7 @@ export default function Home() {
                 </div>
               </div>
               <p className="summaryText">
-                Each prepared S3 page was reviewed against the BCBC reference and consolidated below.
+                Each sheet was reviewed and summarized into plain next steps for the builder or designer.
               </p>
               <div className="compiledReportStats">
                 <div>
