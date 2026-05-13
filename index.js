@@ -146,11 +146,7 @@ const pageReviewSchema = {
 };
 
 function corsHeaders() {
-  return {
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "POST,OPTIONS",
-    "access-control-allow-headers": "content-type"
-  };
+  return {};
 }
 
 function jsonResponse(statusCode, body) {
