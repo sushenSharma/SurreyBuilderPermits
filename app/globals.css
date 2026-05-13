@@ -913,20 +913,56 @@ h2 {
   padding: 10px;
 }
 
+.summaryAction {
+  background: #f8f9f6;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  padding: 10px;
+  text-align: left;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+  width: 100%;
+}
+
+.summaryAction:not(:disabled):hover,
+.summaryAction.active {
+  background: var(--red-soft);
+  border-color: #efb8ad;
+  box-shadow: 0 8px 20px rgba(165, 59, 43, 0.12);
+}
+
+.summaryAction:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
 .openingSummary strong,
-.openingSummary span {
+.openingSummary span,
+.summaryAction strong,
+.summaryAction span {
   display: block;
 }
 
-.openingSummary strong {
+.openingSummary strong,
+.summaryAction strong {
   font-size: 22px;
 }
 
-.openingSummary span {
+.openingSummary span,
+.summaryAction span {
   color: var(--muted);
   font-size: 12px;
   font-weight: 900;
   text-transform: uppercase;
+}
+
+.summaryAction.fail:not(:disabled) span,
+.summaryAction.fail.active strong,
+.summaryAction.fail.active span {
+  color: var(--red);
 }
 
 .openingHeader,
@@ -1268,6 +1304,101 @@ h2 {
 
 .needsInfoDetails li {
   margin-top: 6px;
+}
+
+.failureActionPanel {
+  background: #fff9f7;
+  border: 1px solid #efb8ad;
+  border-radius: 8px;
+  margin-top: 12px;
+  padding: 14px;
+}
+
+.failureActionHeader {
+  border-bottom: 1px solid #f2c9c1;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+}
+
+.failureActionHeader strong,
+.failureActionHeader span {
+  display: block;
+}
+
+.failureActionHeader strong {
+  color: var(--red);
+  font-size: 16px;
+}
+
+.failureActionHeader span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  margin-top: 4px;
+}
+
+.failureList {
+  display: grid;
+  gap: 10px;
+}
+
+.failureItem {
+  background: #ffffff;
+  border: 1px solid #f2c9c1;
+  border-left: 5px solid var(--red);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.failureItem > div:first-child {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.failureItem strong,
+.failureItem em {
+  display: block;
+}
+
+.failureItem em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+  text-align: right;
+}
+
+.failureItem dl {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 12px 0 0;
+}
+
+.failureItem dt,
+.failureItem dd {
+  margin: 0;
+}
+
+.failureItem dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.failureItem dd {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.45;
+  margin-top: 4px;
+}
+
+.deficiencyDetails {
+  background: #ffffff;
+  border-color: #f2c9c1;
 }
 
 .dimensionList {

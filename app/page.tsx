@@ -258,6 +258,7 @@ export default function Home() {
   const [statusMessage, setStatusMessage] = useState("");
   const [dimensionStatusFilter, setDimensionStatusFilter] = useState<DimensionStatusFilter>("FLAG");
   const [dimensionSheetFilter, setDimensionSheetFilter] = useState("ALL");
+  const [expandedFailPage, setExpandedFailPage] = useState<number | null>(null);
   const [steps, setSteps] = useState(defaultSteps);
 
   const fileSize = useMemo(() => {
@@ -352,6 +353,7 @@ export default function Home() {
     setStatusMessage("");
     setDimensionStatusFilter("FLAG");
     setDimensionSheetFilter("ALL");
+    setExpandedFailPage(null);
     setSteps(defaultSteps);
   }
 
@@ -537,6 +539,7 @@ export default function Home() {
     setRunningAction("complete");
     setResult(null);
     setError("");
+    setExpandedFailPage(null);
     setStatusMessage("Starting your permit precheck...");
     setSteps(defaultSteps.map((step, index) => ({ ...step, state: index === 0 ? "done" : index === 1 ? "running" : "idle" })));
 
@@ -937,57 +940,111 @@ export default function Home() {
                 {result.pageReviews
                   .slice()
                   .sort((first, second) => first.page - second.page)
-                  .map((pageReview) => (
-                    <article className="pageReviewCard" key={`page-review-${pageReview.page}`}>
-                      <div className="pageReviewHeader">
-                        <div>
-                          <strong>
-                            Page {pageReview.page} · {pageReview.review.sheet || pageReview.review.title}
-                          </strong>
-                          <span>{pageReview.review.drawingType || "Drawing page"}</span>
+                  .map((pageReview) => {
+                    const failedChecks = pageReview.review.checks?.filter((check) => check.verdict === "FAIL") ?? [];
+                    const isFailExpanded = expandedFailPage === pageReview.page;
+
+                    return (
+                      <article className="pageReviewCard" key={`page-review-${pageReview.page}`}>
+                        <div className="pageReviewHeader">
+                          <div>
+                            <strong>
+                              Page {pageReview.page} · {pageReview.review.sheet || pageReview.review.title}
+                            </strong>
+                            <span>{pageReview.review.drawingType || "Drawing page"}</span>
+                          </div>
+                          <em>{pageReview.review.overallResult}</em>
                         </div>
-                        <em>{pageReview.review.overallResult}</em>
-                      </div>
-                      <p>{pageReview.review.summary}</p>
-                      <div className="openingSummary">
-                        <div>
-                          <strong>{pageReview.review.counts?.pass ?? 0}</strong>
-                          <span>pass</span>
+                        <p>{pageReview.review.summary}</p>
+                        <div className="openingSummary">
+                          <div>
+                            <strong>{pageReview.review.counts?.pass ?? 0}</strong>
+                            <span>pass</span>
+                          </div>
+                          <button
+                            className={`summaryAction fail ${isFailExpanded ? "active" : ""}`}
+                            type="button"
+                            disabled={!failedChecks.length && !pageReview.review.deficiencies?.length}
+                            onClick={() => setExpandedFailPage(isFailExpanded ? null : pageReview.page)}
+                            aria-expanded={isFailExpanded}
+                            aria-controls={`page-${pageReview.page}-failed-items`}
+                          >
+                            <strong>{pageReview.review.counts?.fail ?? 0}</strong>
+                            <span>{isFailExpanded ? "hide failed items" : "show failed items"}</span>
+                          </button>
+                          <div>
+                            <strong>{pageReview.review.counts?.cannotDetermine ?? 0}</strong>
+                            <span>need info</span>
+                          </div>
                         </div>
-                        <div>
-                          <strong>{pageReview.review.counts?.fail ?? 0}</strong>
-                          <span>fail</span>
-                        </div>
-                        <div>
-                          <strong>{pageReview.review.counts?.cannotDetermine ?? 0}</strong>
-                          <span>need info</span>
-                        </div>
-                      </div>
-                      {pageReview.review.deficiencies?.length ? (
-                        <div className="issueList compact">
-                          {pageReview.review.deficiencies.slice(0, 4).map((deficiency, index) => (
-                            <article className="issueItem blocker" key={`${pageReview.page}-deficiency-${index}`}>
-                              <strong>{deficiency.codeReference}</strong>
-                              <p>{deficiency.observedCondition}</p>
-                              <span>{deficiency.requiredCorrection}</span>
-                            </article>
-                          ))}
-                        </div>
-                      ) : null}
-                      {pageReview.review.notDetermined?.length ? (
-                        <details className="needsInfoDetails">
-                          <summary>{pageReview.review.notDetermined.length} items need more information</summary>
-                          <ul>
-                            {pageReview.review.notDetermined.slice(0, 8).map((item, index) => (
-                              <li key={`${pageReview.page}-nd-${index}`}>
-                                <strong>{item.item}:</strong> {item.neededInformation}
-                              </li>
-                            ))}
-                          </ul>
-                        </details>
-                      ) : null}
-                    </article>
-                  ))}
+                        {isFailExpanded ? (
+                          <div className="failureActionPanel" id={`page-${pageReview.page}-failed-items`}>
+                            <div className="failureActionHeader">
+                              <strong>Items to fix before submission</strong>
+                              <span>
+                                These are the checks marked fail for this sheet. Use the correction notes as your action
+                                list.
+                              </span>
+                            </div>
+                            {failedChecks.length ? (
+                              <div className="failureList">
+                                {failedChecks.map((check, index) => (
+                                  <article className="failureItem" key={`${pageReview.page}-failed-check-${index}`}>
+                                    <div>
+                                      <strong>{check.category}</strong>
+                                      <em>{check.codeReference}</em>
+                                    </div>
+                                    <dl>
+                                      <div>
+                                        <dt>Requirement</dt>
+                                        <dd>{check.requirement}</dd>
+                                      </div>
+                                      <div>
+                                        <dt>What the plan shows</dt>
+                                        <dd>{check.observation}</dd>
+                                      </div>
+                                      <div>
+                                        <dt>Builder action</dt>
+                                        <dd>{check.requiredCorrection || "Revise the drawing or provide clarification."}</dd>
+                                      </div>
+                                    </dl>
+                                  </article>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="summaryText">No detailed failed checks were returned for this sheet.</p>
+                            )}
+                            {pageReview.review.deficiencies?.length ? (
+                              <details className="needsInfoDetails deficiencyDetails">
+                                <summary>{pageReview.review.deficiencies.length} deficiency notice(s)</summary>
+                                <div className="issueList compact">
+                                  {pageReview.review.deficiencies.map((deficiency, index) => (
+                                    <article className="issueItem blocker" key={`${pageReview.page}-deficiency-${index}`}>
+                                      <strong>{deficiency.codeReference}</strong>
+                                      <p>{deficiency.observedCondition}</p>
+                                      <span>{deficiency.requiredCorrection}</span>
+                                    </article>
+                                  ))}
+                                </div>
+                              </details>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {pageReview.review.notDetermined?.length ? (
+                          <details className="needsInfoDetails">
+                            <summary>{pageReview.review.notDetermined.length} items need more information</summary>
+                            <ul>
+                              {pageReview.review.notDetermined.slice(0, 8).map((item, index) => (
+                                <li key={`${pageReview.page}-nd-${index}`}>
+                                  <strong>{item.item}:</strong> {item.neededInformation}
+                                </li>
+                              ))}
+                            </ul>
+                          </details>
+                        ) : null}
+                      </article>
+                    );
+                  })}
               </div>
             </div>
           ) : null}
