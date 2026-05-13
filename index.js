@@ -12,6 +12,56 @@ const DEFAULT_DPI = 200;
 const MAX_DPI = 300;
 const SIGNED_URL_EXPIRES_SECONDS = 60 * 60;
 const s3 = new S3Client({});
+const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-5";
+const BCBC_SKILL_PATH = join(__dirname, "skills", "bc-building-code-2024", "SKILL.md");
+
+const PAGE_REVIEW_PROMPT = `You are an experienced BC Building Code 2024 Plans Examiner operating under Division B, Part 9.
+
+Review the uploaded permit drawing page exactly as a municipal reviewer would. Use the attached BCBC skill reference as the controlling source.
+
+For the page:
+1. Identify the drawing type, sheet/page title, scale if visible, level/floor if visible, and occupancy assumption.
+2. Review visible rooms, dimensions, ceiling-height notes, hallways, stairs, landings, guards, handrails, doors, windows, and glazing.
+3. For every check, cite the BCBC Article/Sentence/Table, state the observed condition, and give one verdict: PASS, FAIL, or CANNOT DETERMINE.
+4. Never guess dimensions. If not visible, use CANNOT DETERMINE.
+5. Return only JSON. No markdown.
+
+JSON schema:
+{
+  "page": number,
+  "sheet": string,
+  "title": string,
+  "drawingType": string,
+  "floorLevel": string,
+  "occupancyAssumption": string,
+  "overallResult": "APPROVED" | "REVISIONS REQUIRED" | "INCOMPLETE SUBMISSION",
+  "summary": string,
+  "counts": { "pass": number, "fail": number, "cannotDetermine": number },
+  "checks": [
+    {
+      "category": string,
+      "codeReference": string,
+      "requirement": string,
+      "observation": string,
+      "verdict": "PASS" | "FAIL" | "CANNOT DETERMINE",
+      "requiredCorrection": string
+    }
+  ],
+  "deficiencies": [
+    {
+      "codeReference": string,
+      "requirement": string,
+      "observedCondition": string,
+      "requiredCorrection": string
+    }
+  ],
+  "notDetermined": [
+    {
+      "item": string,
+      "neededInformation": string
+    }
+  ]
+}`;
 
 function corsHeaders() {
   return {
@@ -29,6 +79,121 @@ function jsonResponse(statusCode, body) {
       "content-type": "application/json"
     },
     body: JSON.stringify(body)
+  };
+}
+
+function jsonRequest(event) {
+  const buffer = requestBuffer(event);
+  return buffer.length ? JSON.parse(buffer.toString("utf8")) : {};
+}
+
+function contentTypeFromKey(key = "") {
+  const lower = key.toLowerCase();
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".webp")) return "image/webp";
+  return "image/png";
+}
+
+async function bytesFromReviewRequest(body) {
+  if (body.imageBase64) {
+    return {
+      bytes: Buffer.from(String(body.imageBase64).replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, ""), "base64"),
+      mediaType: body.mediaType || "image/jpeg"
+    };
+  }
+
+  if (body.bucket && body.key) {
+    const object = await s3.send(new GetObjectCommand({ Bucket: body.bucket, Key: body.key }));
+    return {
+      bytes: Buffer.from(await object.Body.transformToByteArray()),
+      mediaType: object.ContentType || contentTypeFromKey(body.key)
+    };
+  }
+
+  if (body.imageUrl || body.url || body.signedUrl) {
+    const url = body.imageUrl || body.url || body.signedUrl;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Could not fetch S3 page image: ${response.status}`);
+    }
+
+    return {
+      bytes: Buffer.from(await response.arrayBuffer()),
+      mediaType: response.headers.get("content-type") || "image/jpeg"
+    };
+  }
+
+  throw new Error("Review page request must include imageUrl, signedUrl, bucket/key, or imageBase64.");
+}
+
+function parseClaudeJson(text) {
+  const trimmed = text.trim();
+  const jsonText = trimmed.startsWith("{")
+    ? trimmed
+    : trimmed.match(/```json\s*([\s\S]*?)```/i)?.[1] || trimmed.match(/\{[\s\S]*\}/)?.[0] || "";
+
+  if (!jsonText) throw new Error("Claude did not return JSON.");
+  return JSON.parse(jsonText);
+}
+
+async function reviewPage(body) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error("ANTHROPIC_API_KEY is not configured on the PDF Lambda.");
+  }
+
+  const skill = await readFile(BCBC_SKILL_PATH, "utf8");
+  const { bytes, mediaType } = await bytesFromReviewRequest(body);
+  const page = Number(body.page || 1);
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+      "x-api-key": apiKey
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 6000,
+      system:
+        "You are a BC municipal plans examiner. Use the supplied skill reference as the controlling code source. Return only valid JSON.",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: mediaType.startsWith("image/") ? mediaType : "image/jpeg",
+                data: bytes.toString("base64")
+              }
+            },
+            {
+              type: "text",
+              text: `${PAGE_REVIEW_PROMPT}\n\nPAGE NUMBER: ${page}\n\nBCBC SKILL REFERENCE:\n\n${skill}`
+            }
+          ]
+        }
+      ]
+    })
+  });
+
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || `Claude page review failed with status ${response.status}`);
+  }
+
+  const text = (payload.content || [])
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n");
+  const review = parseClaudeJson(text);
+
+  return {
+    page,
+    review
   };
 }
 
@@ -212,6 +377,14 @@ async function handleRequest(event) {
       headers: corsHeaders(),
       body: ""
     };
+  }
+
+  const contentType = headerValue(event.headers, "content-type");
+  if (contentType.includes("application/json")) {
+    const body = jsonRequest(event);
+    if (body.action === "reviewPage") {
+      return jsonResponse(200, await reviewPage(body));
+    }
   }
 
   const workspace = await mkdtemp(join(tmpdir(), "pdf-splitter-"));

@@ -1139,6 +1139,89 @@ h2 {
   margin-top: 7px;
 }
 
+.pageReviewList {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.pageReviewCard {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-left: 5px solid var(--green);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.pageReviewHeader {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.pageReviewHeader strong,
+.pageReviewHeader span,
+.pageReviewHeader em {
+  display: block;
+}
+
+.pageReviewHeader span {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 3px;
+}
+
+.pageReviewHeader em {
+  background: var(--green-soft);
+  border-radius: 999px;
+  color: var(--green);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+  padding: 6px 10px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.pageReviewCard p {
+  color: var(--muted);
+  line-height: 1.45;
+  margin: 10px 0 0;
+}
+
+.issueList.compact {
+  gap: 8px;
+}
+
+.issueList.compact .issueItem {
+  padding: 10px 12px;
+}
+
+.needsInfoDetails {
+  background: #f8f9f6;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  margin-top: 10px;
+  padding: 10px 12px;
+}
+
+.needsInfoDetails summary {
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.needsInfoDetails ul {
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+
+.needsInfoDetails li {
+  margin-top: 6px;
+}
+
 .dimensionList {
   display: grid;
   gap: 10px;

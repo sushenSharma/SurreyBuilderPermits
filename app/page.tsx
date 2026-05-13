@@ -89,6 +89,43 @@ type OpeningTag = {
   source: string;
 };
 
+type PageReview = {
+  page: number;
+  review: {
+    page: number;
+    sheet: string;
+    title: string;
+    drawingType: string;
+    floorLevel: string;
+    occupancyAssumption: string;
+    overallResult: "APPROVED" | "REVISIONS REQUIRED" | "INCOMPLETE SUBMISSION";
+    summary: string;
+    counts: {
+      pass: number;
+      fail: number;
+      cannotDetermine: number;
+    };
+    checks: Array<{
+      category: string;
+      codeReference: string;
+      requirement: string;
+      observation: string;
+      verdict: "PASS" | "FAIL" | "CANNOT DETERMINE";
+      requiredCorrection: string;
+    }>;
+    deficiencies: Array<{
+      codeReference: string;
+      requirement: string;
+      observedCondition: string;
+      requiredCorrection: string;
+    }>;
+    notDetermined: Array<{
+      item: string;
+      neededInformation: string;
+    }>;
+  };
+};
+
 type SplitterResult = {
   summary: {
     sheetCount: number;
@@ -182,6 +219,7 @@ type SplitterResult = {
       error?: string;
     }>;
   };
+  pageReviews?: PageReview[];
 };
 
 const defaultSteps: AgentStep[] = [
@@ -201,6 +239,8 @@ const stepDescriptions = [
   "Checks the extracted information against BCBC review rules.",
   "Compiles the findings into a readable precheck report."
 ];
+
+const pdfLambdaUrl = process.env.NEXT_PUBLIC_PDF_LAMBDA_URL ?? "";
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
@@ -246,6 +286,34 @@ export default function Home() {
     }),
     [result]
   );
+
+  const planCheckSummary = useMemo(() => {
+    const pageReviews = result?.pageReviews ?? [];
+
+    return pageReviews.reduce(
+      (summary, pageReview) => {
+        summary.pages += 1;
+        summary.pass += pageReview.review.counts?.pass ?? 0;
+        summary.fail += pageReview.review.counts?.fail ?? 0;
+        summary.cannotDetermine += pageReview.review.counts?.cannotDetermine ?? 0;
+        summary.deficiencies += pageReview.review.deficiencies?.length ?? 0;
+        summary.notDetermined += pageReview.review.notDetermined?.length ?? 0;
+        if (pageReview.review.overallResult === "REVISIONS REQUIRED") summary.revisions += 1;
+        if (pageReview.review.overallResult === "INCOMPLETE SUBMISSION") summary.incomplete += 1;
+        return summary;
+      },
+      {
+        pages: 0,
+        pass: 0,
+        fail: 0,
+        cannotDetermine: 0,
+        deficiencies: 0,
+        notDetermined: 0,
+        revisions: 0,
+        incomplete: 0
+      }
+    );
+  }, [result?.pageReviews]);
 
   const progressState = useMemo(() => {
     const completedSteps = steps.filter((step) => step.state === "done").length;
@@ -299,6 +367,9 @@ export default function Home() {
       ...payload,
       sheets: mergeUniqueBy(current?.sheets ?? [], payload.sheets ?? [], (sheet) => sheet.id),
       remotePages: payload.remotePages ?? current?.remotePages,
+      pageReviews: mergeUniqueBy(current?.pageReviews ?? [], payload.pageReviews ?? [], (pageReview) =>
+        String(pageReview.page)
+      ),
       extraction:
         payload.extraction || current?.extraction
           ? {
@@ -426,6 +497,33 @@ export default function Home() {
     return payload as SplitterResult;
   }
 
+  async function reviewS3Page(page: NonNullable<SplitterResult["remotePages"]>[number]) {
+    if (!pdfLambdaUrl) {
+      throw new Error("PDF review service is not configured.");
+    }
+
+    const response = await fetch(pdfLambdaUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        action: "reviewPage",
+        page: page.page,
+        imageUrl: page.url,
+        bucket: page.bucket,
+        key: page.key
+      })
+    });
+    const payload = await response.json();
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? `Page ${page.page} review failed.`);
+    }
+
+    return payload as PageReview;
+  }
+
   async function runCompleteReport() {
     if (!file || isRunning) return;
 
@@ -438,38 +536,18 @@ export default function Home() {
 
     try {
       setStatusMessage("Splitting PDF into prepared review pages...");
-      const startPayload = await postPipelineAction("startAsyncReport", { dpi: "100" });
-      const jobId = startPayload.job?.jobId;
-
-      if (!jobId) {
-        throw new Error("Report job did not start.");
-      }
-
-      mergeResultPayload(startPayload);
+      const splitPayload = await postPipelineAction("splitRemote", { dpi: "100" });
+      const remotePages = splitPayload.remotePages ?? [];
+      mergeResultPayload(splitPayload);
       setSteps(defaultSteps.map((step, index) => ({ ...step, state: index <= 2 ? "done" : index === 3 ? "running" : "idle" })));
 
-      for (;;) {
-        const statusPayload = await postPipelineAction("asyncReportAdvance", { jobId });
-        const job = statusPayload.job;
-        mergeResultPayload(statusPayload);
-
-        if (!job) {
-          throw new Error("Report job status was not returned.");
-        }
-
-        setStatusMessage(
-          job.status === "complete"
-            ? "Compiling final report..."
-            : `Reviewing pages ${job.completedPages} of ${job.totalPages} complete${
-                job.currentPage ? `, page ${job.currentPage} is running` : ""
-              }...`
-        );
-
-        if (job.status === "complete") break;
-        if (job.status === "error") throw new Error(job.error ?? "Report job failed.");
-
-        await new Promise((resolve) => window.setTimeout(resolve, 5000));
+      for (const remotePage of remotePages) {
+        setStatusMessage(`Reviewing page ${remotePage.page} of ${remotePages.length} against BCBC rules...`);
+        const pageReview = await reviewS3Page(remotePage);
+        mergeResultPayload({ ...splitPayload, pageReviews: [pageReview] });
       }
+
+      setStatusMessage("Consolidating page reviews into final report...");
 
       setSteps(defaultSteps.map((step) => ({ ...step, state: "done" })));
       setStatusMessage("Report complete. Rooms, openings, and BCBC checks are ready.");
@@ -789,6 +867,108 @@ export default function Home() {
                   <strong>{reportSummary.flags}</strong>
                   <span>flagged checks</span>
                 </div>
+              </div>
+            </div>
+          ) : null}
+
+          {result?.pageReviews?.length ? (
+            <div className="compiledReportPanel">
+              <div className="resultsHeader">
+                <div>
+                  <p className="eyebrow">BCBC page review</p>
+                  <h2>
+                    {planCheckSummary.pages} pages checked, {planCheckSummary.deficiencies} deficiencies found
+                  </h2>
+                </div>
+                <div className="score">
+                  <strong>{planCheckSummary.fail}</strong>
+                  <span>failed checks</span>
+                </div>
+              </div>
+              <p className="summaryText">
+                Each prepared S3 page was reviewed against the BCBC reference and consolidated below.
+              </p>
+              <div className="compiledReportStats">
+                <div>
+                  <strong>{planCheckSummary.pass}</strong>
+                  <span>pass</span>
+                </div>
+                <div>
+                  <strong>{planCheckSummary.fail}</strong>
+                  <span>fail</span>
+                </div>
+                <div>
+                  <strong>{planCheckSummary.cannotDetermine}</strong>
+                  <span>need info</span>
+                </div>
+                <div>
+                  <strong>{planCheckSummary.deficiencies}</strong>
+                  <span>deficiencies</span>
+                </div>
+                <div>
+                  <strong>{planCheckSummary.revisions}</strong>
+                  <span>revision pages</span>
+                </div>
+                <div>
+                  <strong>{planCheckSummary.incomplete}</strong>
+                  <span>incomplete pages</span>
+                </div>
+              </div>
+              <div className="pageReviewList">
+                {result.pageReviews
+                  .slice()
+                  .sort((first, second) => first.page - second.page)
+                  .map((pageReview) => (
+                    <article className="pageReviewCard" key={`page-review-${pageReview.page}`}>
+                      <div className="pageReviewHeader">
+                        <div>
+                          <strong>
+                            Page {pageReview.page} · {pageReview.review.sheet || pageReview.review.title}
+                          </strong>
+                          <span>{pageReview.review.drawingType || "Drawing page"}</span>
+                        </div>
+                        <em>{pageReview.review.overallResult}</em>
+                      </div>
+                      <p>{pageReview.review.summary}</p>
+                      <div className="openingSummary">
+                        <div>
+                          <strong>{pageReview.review.counts?.pass ?? 0}</strong>
+                          <span>pass</span>
+                        </div>
+                        <div>
+                          <strong>{pageReview.review.counts?.fail ?? 0}</strong>
+                          <span>fail</span>
+                        </div>
+                        <div>
+                          <strong>{pageReview.review.counts?.cannotDetermine ?? 0}</strong>
+                          <span>need info</span>
+                        </div>
+                      </div>
+                      {pageReview.review.deficiencies?.length ? (
+                        <div className="issueList compact">
+                          {pageReview.review.deficiencies.slice(0, 4).map((deficiency, index) => (
+                            <article className="issueItem blocker" key={`${pageReview.page}-deficiency-${index}`}>
+                              <strong>{deficiency.codeReference}</strong>
+                              <p>{deficiency.observedCondition}</p>
+                              <span>{deficiency.requiredCorrection}</span>
+                            </article>
+                          ))}
+                        </div>
+                      ) : null}
+                      {pageReview.review.notDetermined?.length ? (
+                        <details className="needsInfoDetails">
+                          <summary>{pageReview.review.notDetermined.length} items need more information</summary>
+                          <ul>
+                            {pageReview.review.notDetermined.slice(0, 8).map((item, index) => (
+                              <li key={`${pageReview.page}-nd-${index}`}>
+                                <strong>{item.item}:</strong> {item.neededInformation}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      ) : null}
+                    </article>
+                  ))}
               </div>
             </div>
           ) : null}
