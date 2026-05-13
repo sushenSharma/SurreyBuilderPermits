@@ -63,6 +63,88 @@ JSON schema:
   ]
 }`;
 
+const pageReviewSchema = {
+  type: "object",
+  properties: {
+    page: { type: "number" },
+    sheet: { type: "string" },
+    title: { type: "string" },
+    drawingType: { type: "string" },
+    floorLevel: { type: "string" },
+    occupancyAssumption: { type: "string" },
+    overallResult: {
+      type: "string",
+      enum: ["APPROVED", "REVISIONS REQUIRED", "INCOMPLETE SUBMISSION"]
+    },
+    summary: { type: "string" },
+    counts: {
+      type: "object",
+      properties: {
+        pass: { type: "number" },
+        fail: { type: "number" },
+        cannotDetermine: { type: "number" }
+      },
+      required: ["pass", "fail", "cannotDetermine"]
+    },
+    checks: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          category: { type: "string" },
+          codeReference: { type: "string" },
+          requirement: { type: "string" },
+          observation: { type: "string" },
+          verdict: {
+            type: "string",
+            enum: ["PASS", "FAIL", "CANNOT DETERMINE"]
+          },
+          requiredCorrection: { type: "string" }
+        },
+        required: ["category", "codeReference", "requirement", "observation", "verdict", "requiredCorrection"]
+      }
+    },
+    deficiencies: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          codeReference: { type: "string" },
+          requirement: { type: "string" },
+          observedCondition: { type: "string" },
+          requiredCorrection: { type: "string" }
+        },
+        required: ["codeReference", "requirement", "observedCondition", "requiredCorrection"]
+      }
+    },
+    notDetermined: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          item: { type: "string" },
+          neededInformation: { type: "string" }
+        },
+        required: ["item", "neededInformation"]
+      }
+    }
+  },
+  required: [
+    "page",
+    "sheet",
+    "title",
+    "drawingType",
+    "floorLevel",
+    "occupancyAssumption",
+    "overallResult",
+    "summary",
+    "counts",
+    "checks",
+    "deficiencies",
+    "notDetermined"
+  ]
+};
+
 function corsHeaders() {
   return {
     "access-control-allow-origin": "*",
@@ -126,14 +208,9 @@ async function bytesFromReviewRequest(body) {
   throw new Error("Review page request must include imageUrl, signedUrl, bucket/key, or imageBase64.");
 }
 
-function parseClaudeJson(text) {
-  const trimmed = text.trim();
-  const jsonText = trimmed.startsWith("{")
-    ? trimmed
-    : trimmed.match(/```json\s*([\s\S]*?)```/i)?.[1] || trimmed.match(/\{[\s\S]*\}/)?.[0] || "";
-
-  if (!jsonText) throw new Error("Claude did not return JSON.");
-  return JSON.parse(jsonText);
+function toolInput(payload, name) {
+  const block = (payload.content || []).find((item) => item.type === "tool_use" && item.name === name);
+  return block?.input || null;
 }
 
 async function reviewPage(body) {
@@ -157,7 +234,18 @@ async function reviewPage(body) {
       model: MODEL,
       max_tokens: 6000,
       system:
-        "You are a BC municipal plans examiner. Use the supplied skill reference as the controlling code source. Return only valid JSON.",
+        "You are a BC municipal plans examiner. Use the supplied skill reference as the controlling code source.",
+      tools: [
+        {
+          name: "record_page_review",
+          description: "Record the structured BCBC plan-check review for one permit drawing page.",
+          input_schema: pageReviewSchema
+        }
+      ],
+      tool_choice: {
+        type: "tool",
+        name: "record_page_review"
+      },
       messages: [
         {
           role: "user",
@@ -185,11 +273,10 @@ async function reviewPage(body) {
     throw new Error(payload?.error?.message || `Claude page review failed with status ${response.status}`);
   }
 
-  const text = (payload.content || [])
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("\n");
-  const review = parseClaudeJson(text);
+  const review = toolInput(payload, "record_page_review");
+  if (!review || typeof review !== "object") {
+    throw new Error("Claude did not return a structured page review.");
+  }
 
   return {
     page,
