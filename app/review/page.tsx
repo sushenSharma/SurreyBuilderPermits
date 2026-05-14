@@ -5,13 +5,17 @@ import {
   CheckCircle2,
   FileText,
   Layers3,
+  LogOut,
   Loader2,
   ShieldCheck,
   Sparkles,
   UploadCloud,
   X
 } from "lucide-react";
-import { DragEvent, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { DragEvent, useEffect, useMemo, useState } from "react";
+import { createClient } from "../../lib/supabase/client";
+import { isSupabaseConfigured } from "../../lib/supabase/config";
 
 type Sheet = {
   id: string;
@@ -249,6 +253,7 @@ const builderPromise = [
 const pdfLambdaUrl = process.env.NEXT_PUBLIC_PDF_LAMBDA_URL ?? "";
 
 export default function Home() {
+  const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
@@ -260,6 +265,8 @@ export default function Home() {
   const [dimensionSheetFilter, setDimensionSheetFilter] = useState("ALL");
   const [expandedFailPage, setExpandedFailPage] = useState<number | null>(null);
   const [steps, setSteps] = useState(defaultSteps);
+  const supabase = useMemo(() => (isSupabaseConfigured() ? createClient() : null), []);
+  const [userEmail, setUserEmail] = useState("");
 
   const fileSize = useMemo(() => {
     if (!file) return "";
@@ -321,6 +328,14 @@ export default function Home() {
       }
     );
   }, [result?.pageReviews]);
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    supabase.auth.getUser().then(({ data }) => {
+      setUserEmail(data.user?.email ?? "");
+    });
+  }, [supabase]);
 
   const progressState = useMemo(() => {
     const completedSteps = steps.filter((step) => step.state === "done").length;
@@ -572,6 +587,15 @@ export default function Home() {
     }
   }
 
+  async function signOut() {
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
+
+    router.replace("/login");
+    router.refresh();
+  }
+
   return (
     <main className="shell">
       <aside className="sidebar" aria-label="Pipeline">
@@ -619,10 +643,13 @@ export default function Home() {
               checklist.
             </p>
           </div>
-          <button className="ghostButton" type="button">
-            <Sparkles size={18} />
-            BCBC 2024 precheck
-          </button>
+          <div className="accountActions">
+            <span>{userEmail || "Signed in"}</span>
+            <button className="ghostButton" type="button" onClick={signOut}>
+              <LogOut size={18} />
+              Sign out
+            </button>
+          </div>
         </header>
 
         <div className="contentGrid">

@@ -2418,6 +2418,133 @@ h2 {
   padding: 24px 0 10px;
 }
 
+.loginShell {
+  align-items: center;
+  background:
+    linear-gradient(135deg, rgba(12, 124, 103, 0.12), transparent 36%),
+    var(--bg);
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.loginCard {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  max-width: 480px;
+  padding: 26px;
+  width: 100%;
+}
+
+.loginBrand {
+  margin-bottom: 28px;
+}
+
+.loginIntro h1 {
+  font-size: 34px;
+  line-height: 1.05;
+  margin-bottom: 10px;
+}
+
+.loginIntro p:not(.eyebrow) {
+  color: var(--muted);
+  line-height: 1.5;
+  margin-bottom: 0;
+}
+
+.loginNotice {
+  align-items: flex-start;
+  background: var(--amber-soft);
+  border: 1px solid #f0d39a;
+  border-radius: 8px;
+  color: #805000;
+  display: flex;
+  gap: 10px;
+  line-height: 1.45;
+  margin-top: 18px;
+  padding: 12px;
+}
+
+.authForm {
+  display: grid;
+  gap: 14px;
+  margin-top: 22px;
+}
+
+.authForm label,
+.authForm label span {
+  display: block;
+}
+
+.authForm label span {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 900;
+  margin-bottom: 7px;
+  text-transform: uppercase;
+}
+
+.authForm input {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  min-height: 48px;
+  padding: 0 12px;
+  width: 100%;
+}
+
+.authForm input:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(12, 124, 103, 0.12);
+  outline: none;
+}
+
+.authSubmit {
+  border: 0;
+  justify-content: center;
+  margin-top: 4px;
+  width: 100%;
+}
+
+.authSubmit:disabled {
+  background: #aeb8b2;
+  box-shadow: none;
+}
+
+.authSwitch {
+  background: transparent;
+  border: 0;
+  color: var(--green);
+  font-weight: 900;
+  margin-top: 16px;
+  min-height: 38px;
+  width: 100%;
+}
+
+.accountActions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.accountActions > span {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  max-width: 220px;
+  overflow: hidden;
+  padding: 10px 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .spin {
   animation: spin 900ms linear infinite;
 }

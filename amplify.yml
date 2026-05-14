@@ -6,7 +6,7 @@ frontend:
         - npm ci
     build:
       commands:
-        - env | grep -e '^ANTHROPIC_API_KEY=' -e '^ANTHROPIC_MODEL=' -e '^PDF_LAMBDA_URL=' -e '^NEXT_SERVER_PDF_LAMBDA_URL=' -e '^NEXT_PUBLIC_PDF_LAMBDA_URL=' -e '^PDF_SPLITTER_URL=' -e '^PDF_PAGE_BUCKET=' -e '^PDF_PAGE_PREFIX=' >> .env.production
+        - env | grep -e '^ANTHROPIC_API_KEY=' -e '^ANTHROPIC_MODEL=' -e '^PDF_LAMBDA_URL=' -e '^NEXT_SERVER_PDF_LAMBDA_URL=' -e '^NEXT_PUBLIC_PDF_LAMBDA_URL=' -e '^PDF_SPLITTER_URL=' -e '^PDF_PAGE_BUCKET=' -e '^PDF_PAGE_PREFIX=' -e '^NEXT_PUBLIC_SUPABASE_URL=' -e '^NEXT_PUBLIC_SUPABASE_ANON_KEY=' -e '^NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=' -e '^SUPABASE_SERVICE_ROLE_KEY=' >> .env.production
         - npm run build
   artifacts:
     baseDirectory: .next
