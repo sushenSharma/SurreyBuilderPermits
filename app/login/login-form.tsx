@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useMemo, useState } from "react";
 import { createClient } from "../../lib/supabase/client";
-import { isSupabaseConfigured } from "../../lib/supabase/config";
+import { appUrl, isSupabaseConfigured } from "../../lib/supabase/config";
 
 type AuthMode = "sign-in" | "sign-up";
 
@@ -23,6 +23,10 @@ export default function LoginForm() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const supabase = useMemo(() => (isSupabaseConfigured() ? createClient() : null), []);
+  const authBaseUrl = appUrl || (typeof window !== "undefined" ? window.location.origin : "");
+  const callbackUrl = authBaseUrl
+    ? `${authBaseUrl}/auth/callback?next=${encodeURIComponent(safeRedirectTo)}`
+    : `/auth/callback?next=${encodeURIComponent(safeRedirectTo)}`;
 
   async function handleGoogleSignIn() {
     setError("");
@@ -38,7 +42,7 @@ export default function LoginForm() {
     const { error: googleError } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeRedirectTo)}`
+        redirectTo: callbackUrl
       }
     });
 
@@ -77,7 +81,7 @@ export default function LoginForm() {
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeRedirectTo)}`
+          emailRedirectTo: callbackUrl
         }
       });
 
