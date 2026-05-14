@@ -18,9 +18,34 @@ export default function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const supabase = useMemo(() => (isSupabaseConfigured() ? createClient() : null), []);
+
+  async function handleGoogleSignIn() {
+    setError("");
+    setMessage("");
+
+    if (!supabase) {
+      setError("Supabase is not configured yet. Add your Supabase URL and anon key to the environment.");
+      return;
+    }
+
+    setIsGoogleSubmitting(true);
+
+    const { error: googleError } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}${redirectTo}`
+      }
+    });
+
+    if (googleError) {
+      setError(googleError.message);
+      setIsGoogleSubmitting(false);
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -90,6 +115,26 @@ export default function LoginForm() {
             <span>Supabase environment variables are missing in this environment.</span>
           </div>
         ) : null}
+
+        <button
+          className="googleAuthButton"
+          disabled={isGoogleSubmitting || !supabase}
+          type="button"
+          onClick={handleGoogleSignIn}
+        >
+          {isGoogleSubmitting ? (
+            <Loader2 className="spin" size={18} />
+          ) : (
+            <span className="googleMark" aria-hidden="true">
+              G
+            </span>
+          )}
+          Continue with Google
+        </button>
+
+        <div className="authDivider">
+          <span>or use email</span>
+        </div>
 
         <form className="authForm" onSubmit={handleSubmit}>
           <label>
