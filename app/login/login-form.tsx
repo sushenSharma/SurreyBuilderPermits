@@ -13,6 +13,7 @@ export default function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get("redirect") || "/review";
+  const safeRedirectTo = redirectTo.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/review";
   const setupMissing = searchParams.get("setup") === "missing";
   const [mode, setMode] = useState<AuthMode>("sign-in");
   const [email, setEmail] = useState("");
@@ -37,7 +38,7 @@ export default function LoginForm() {
     const { error: googleError } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}${redirectTo}`
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeRedirectTo)}`
       }
     });
 
@@ -67,7 +68,7 @@ export default function LoginForm() {
         });
 
         if (signInError) throw signInError;
-        router.replace(redirectTo);
+        router.replace(safeRedirectTo);
         router.refresh();
         return;
       }
@@ -76,7 +77,7 @@ export default function LoginForm() {
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/review`
+          emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(safeRedirectTo)}`
         }
       });
 
