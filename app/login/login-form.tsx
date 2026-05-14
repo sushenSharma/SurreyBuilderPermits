@@ -23,7 +23,11 @@ export default function LoginForm() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const supabase = useMemo(() => (isSupabaseConfigured() ? createClient() : null), []);
-  const authBaseUrl = appUrl || (typeof window !== "undefined" ? window.location.origin : "");
+  const browserOrigin = typeof window !== "undefined" ? window.location.origin : "";
+  const configuredAppUrlPointsToLocalhost = appUrl.includes("localhost") || appUrl.includes("127.0.0.1");
+  const browserIsLocalhost = browserOrigin.includes("localhost") || browserOrigin.includes("127.0.0.1");
+  const authBaseUrl =
+    appUrl && (!configuredAppUrlPointsToLocalhost || browserIsLocalhost) ? appUrl : browserOrigin;
   const callbackUrl = authBaseUrl
     ? `${authBaseUrl}/auth/callback?next=${encodeURIComponent(safeRedirectTo)}`
     : `/auth/callback?next=${encodeURIComponent(safeRedirectTo)}`;
