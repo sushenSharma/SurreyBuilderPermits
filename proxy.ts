@@ -15,16 +15,21 @@ function isProtectedApi(pathname: string) {
 
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+  const isLoginPage = pathname === "/login";
   const protectsPage = isProtectedPage(pathname);
   const protectsApi = isProtectedApi(pathname);
 
-  if (!protectsPage && !protectsApi && pathname !== "/login") {
+  if (!protectsPage && !protectsApi && !isLoginPage) {
     return NextResponse.next();
   }
 
   if (!supabaseUrl || !supabaseAnonKey) {
     if (protectsApi) {
       return NextResponse.json({ error: "Supabase auth is not configured." }, { status: 500 });
+    }
+
+    if (isLoginPage) {
+      return NextResponse.next();
     }
 
     const loginUrl = request.nextUrl.clone();
